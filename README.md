@@ -1,20 +1,35 @@
 # EPA Risk Assessment Assistant
 
-A Streamlit-powered chatbot that lets users ask natural language questions about the EPA Risk and Control Registry. It uses a RAG (Retrieval-Augmented Generation) pipeline that combines semantic search with keyword lookup to find the most relevant risk records, then passes them to an LLM for a structured answer.
+A Streamlit-powered chatbot that lets users ask natural language questions about the EPA Risk and Control Registry. It uses a RAG (Retrieval-Augmented Generation) pipeline that combines semantic search with keyword lookup to find the most relevant risk records, then passes them to an LLM for a structured, streaming answer.
+
+## Features
+
+- **Chat Interface**: Full conversational UI with chat history so users can ask follow-up questions
+- **Spell Correction**: Automatically corrects typos (e.g., "hazadorus" -> "hazardous") using fuzzy matching against the dataset vocabulary
+- **Dual Search Strategy**: Combines keyword-based lookup with embedding-based semantic search for better recall
+- **Smart Aggregate Detection**: Two-pass system that distinguishes between specific risk queries and analytical questions
+- **Streaming Responses**: LLM answers stream in real-time as tokens are generated
+- **Confidence Scoring**: Color-coded relevance labels (High/Moderate/Low) based on cosine similarity
+- **Example Questions**: Clickable example buttons for new users to get started quickly
+- **Large Result Summarization**: Groups duplicate risk titles and shows counts when result sets are large
 
 ## How It Works
 
-1. **Data Loading**: Reads the EPA Risk and Control Registry CSV file (1,650 records) and standardizes column names for internal use.
+1. **Data Loading**: Reads the EPA Risk and Control Registry CSV file (1,650 records), standardizes column names, and pre-computes lowercase columns for fast keyword lookups. All data is cached with `@st.cache_data`.
 
-2. **Embedding Generation**: Each risk record is converted into a sentence and encoded into a 384-dimensional vector using the `all-MiniLM-L6-v2` sentence transformer model. These embeddings are cached in memory so they only compute once.
+2. **Spell Correction**: Builds a vocabulary from all risk titles, descriptions, levels, and control types. When a user submits a question, each word is compared against the vocabulary using `difflib.get_close_matches` (cutoff 0.8) to fix typos before searching.
 
-3. **User Query Processing**: When a user asks a question, the app runs two parallel search strategies:
-   - **Keyword Lookup**: Searches the dataframe directly for matching risk levels, control types, and title keywords.
+3. **Embedding Generation**: Each risk record is converted into a sentence and encoded into a 384-dimensional vector using the `all-MiniLM-L6-v2` sentence transformer model. Cached in memory with `@st.cache_resource`.
+
+4. **User Query Processing**: When a user asks a question, the app runs two parallel search strategies:
+   - **Keyword Lookup**: Searches the dataframe for matching risk levels, control types, and title keywords. Title matching requires 2+ significant word matches for multi-word titles to reduce noise.
    - **Semantic Search**: Encodes the question into a vector and finds the top 10 most similar records using cosine similarity.
 
-4. **Aggregate Detection**: If the question contains aggregate keywords (e.g., "how many", "list all", "breakdown"), the app includes pre-computed dataset summary statistics in the context.
+5. **Aggregate Detection**: Uses a two-pass approach. First checks if the question targets a specific risk (by matching risk titles). Only falls back to aggregate mode if no specific risk is identified AND aggregate keywords are present. This prevents "what are all the controls for spill risk?" from being treated as an aggregate question.
 
-5. **LLM Response**: The retrieved records are sent to Llama 3.3 70B (via Groq) with a system prompt that instructs it to format the answer with a "Best Match" section and "Other Controls to Consider" section.
+6. **Record Summarization**: When more than 15 matching records are found, groups them by risk title with counts and includes a sample of individual records. This prevents token overflow in the LLM context.
+
+7. **LLM Streaming Response**: The retrieved records (with best match labeled separately) and any chat history (last 3 exchanges) are sent to Llama 3.3 70B via Groq with streaming enabled. Tokens are displayed in real-time using `st.write_stream`.
 
 ## Dataset
 
@@ -34,12 +49,13 @@ The app uses `Epa risk and control registry.csv` which contains 1,650 risk recor
 
 | Technology | Purpose |
 |------------|---------|
-| Streamlit | Web UI framework |
+| Streamlit | Web UI framework with chat interface |
 | Sentence Transformers | Embedding model (`all-MiniLM-L6-v2`) for semantic search |
-| Groq | LLM API provider for fast inference |
+| Groq | LLM API provider for fast streaming inference |
 | Llama 3.3 70B | Large language model for generating answers |
 | Pandas | Data loading and manipulation |
 | PyTorch | Backend for sentence transformer model |
+| difflib | Standard library fuzzy matching for spell correction |
 
 ## Project Structure
 
@@ -88,12 +104,27 @@ streamlit run app.py
 
 5. Open your browser to `http://localhost:8501`
 
+### Deploying to Streamlit Cloud
+
+1. Push your repo to GitHub (make sure `.env` is in `.gitignore`)
+2. Go to [share.streamlit.io](https://share.streamlit.io) and deploy the repo
+3. In app settings, go to **Secrets** and add:
+
+```toml
+GROQ_API_KEY = "your_groq_api_key_here"
+```
+
 ## Example Questions
 
 ### Specific Risk Lookups
 - "What is the Unliquidated Obligations risk?"
 - "Tell me about Hazardous Waste Mishandling"
 - "What controls are in place for Chemical Spill Response Delay?"
+
+### Follow-up Questions (uses chat history)
+- "Tell me more about the secondary control"
+- "What about the preventive controls for that?"
+- "Are there similar risks?"
 
 ### Filter by Risk Level
 - "Show me all high risks"
@@ -108,10 +139,10 @@ streamlit run app.py
 - "Give me a breakdown of risks by level"
 - "What are the most common control types?"
 
-### Semantic / Natural Language
+### Semantic / Natural Language (with typo tolerance)
 - "What risks are related to environmental damage?"
 - "Are there any risks about vendor management?"
-- "How to handle hazardous materials?"
+- "How to handle hazadorus materials?" (auto-corrects to "hazardous")
 
 ## Output Format
 
@@ -130,22 +161,32 @@ User Question
       |
       v
 +---------------------+
-|   Streamlit UI      |
+|   Spell Correction   |
+|   (difflib fuzzy     |
+|    matching)         |
++---------------------+
+      |
+      v
++---------------------+
+|  Aggregate Detection |
+|  (two-pass: specific |
+|   risk check first)  |
 +---------------------+
       |
       v
 +---------------------+     +----------------------+
 |  Keyword Lookup     |     |  Semantic Search     |
-|  (exact matching    |     |  (cosine similarity  |
-|   on risk level,    |     |   using MiniLM-L6    |
-|   title, control)   |     |   embeddings)        |
+|  (pre-computed      |     |  (cosine similarity  |
+|   lowercase cols,   |     |   using MiniLM-L6    |
+|   2+ word matching) |     |   embeddings)        |
 +---------------------+     +----------------------+
       |                           |
       +--------+------------------+
                |
                v
      +-------------------+
-     | Combine & Dedupe  |
+     | Combine, Dedupe   |
+     | & Summarize       |
      | (Best Match +     |
      |  Other Records)   |
      +-------------------+
@@ -154,19 +195,25 @@ User Question
      +-------------------+
      | Groq LLM          |
      | (Llama 3.3 70B)   |
+     | + Chat History     |
+     | + Streaming        |
      +-------------------+
                |
                v
-     Structured Answer
+     Streaming Answer
+     with Confidence Label
 ```
 
 ## Configuration
 
 | Setting | Value | Location |
 |---------|-------|----------|
-| Embedding Model | all-MiniLM-L6-v2 | `app.py` line 49 |
-| LLM Model | llama-3.3-70b-versatile | `app.py` line 118 |
-| Top K Results | 10 | `app.py` line 207 |
-| LLM Temperature | 0.1 | `app.py` line 157 |
-| Max Tokens | 1500 | `app.py` line 158 |
-| Max Records to LLM | 50 | `app.py` line 231 |
+| Embedding Model | all-MiniLM-L6-v2 | `app.py` |
+| LLM Model | llama-3.3-70b-versatile | `app.py` |
+| Top K Results | 10 | `app.py` |
+| LLM Temperature | 0.1 | `app.py` |
+| Max Tokens | 1500 | `app.py` |
+| Max Records to LLM | 50 | `app.py` |
+| Spell Correction Cutoff | 0.8 | `app.py` |
+| Chat History Window | Last 3 exchanges | `app.py` |
+| Record Summarization Threshold | 15 records | `app.py` |
