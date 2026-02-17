@@ -93,7 +93,9 @@ vocabulary = build_vocabulary()
 
 def correct_query(question):
     """Corrects misspelled words in the user's question by matching against
-    known terms from the dataset. Returns the corrected query string."""
+    known terms from the dataset. Only corrects when the match is a similar
+    length (within 2 chars) to avoid false positives like 'correct' ->
+    'corrective'. Returns the corrected query string."""
     words = question.split()
     corrected = []
     for word in words:
@@ -102,7 +104,7 @@ def correct_query(question):
             continue
         clean = word.lower().strip("?.,!;:")
         matches = difflib.get_close_matches(clean, vocabulary, n=1, cutoff=0.8)
-        if matches and matches[0] != clean:
+        if matches and matches[0] != clean and abs(len(matches[0]) - len(clean)) <= 2:
             corrected.append(matches[0])
         else:
             corrected.append(word)
@@ -385,24 +387,64 @@ def confidence_label(score):
 
 
 # =============================================================================
+# FOLLOW-UP QUESTION DETECTION
+# Detects when the user is asking a follow-up question that references the
+# previous conversation (e.g., "tell me more about that", "what about the
+# secondary control?"). When detected, prepends the previous user question
+# to the current one so the retrieval step searches for the right records.
+# Without this, "tell me more" would embed as-is and match random records.
+# =============================================================================
+FOLLOW_UP_INDICATORS = [
+    "that", "this", "it", "them", "those", "the same",
+    "more about", "tell me more", "what about", "how about",
+    "can you explain", "elaborate", "expand on", "go deeper",
+    "previous", "above", "earlier", "you mentioned",
+]
+
+
+def resolve_follow_up(question, messages):
+    """If the question looks like a follow-up, prepend the last user question
+    so retrieval has enough context to find the right records."""
+    if not messages:
+        return question
+
+    q_lower = question.lower()
+    is_follow_up = (
+        len(question.split()) < 8
+        or any(indicator in q_lower for indicator in FOLLOW_UP_INDICATORS)
+    )
+
+    if is_follow_up:
+        # Find the last user question in chat history
+        for msg in reversed(messages):
+            if msg["role"] == "user":
+                return f"{msg['content']} {question}"
+                break
+
+    return question
+
+
+# =============================================================================
 # RAG PIPELINE (RETRIEVAL-AUGMENTED GENERATION)
 # This is the main retrieval function that ties everything together:
-#   1. Corrects spelling in the user's question using difflib
-#   2. Determines if the question is aggregate (two-pass detection)
-#   3. Runs keyword-based lookup on the dataframe for exact matches
-#   4. Runs embedding-based semantic search for the top 10 similar records
-#   5. Combines both result sets, removing duplicates
-#   6. For large result sets, summarizes records by grouping titles
-#   7. For aggregate questions: includes dataset summary statistics
-#   8. For specific questions: labels the best match separately
-#   9. Returns the context string and metadata for the streaming LLM call
+#   1. Resolves follow-up questions using chat history
+#   2. Corrects spelling in the user's question using difflib
+#   3. Determines if the question is aggregate (two-pass detection)
+#   4. Runs keyword-based lookup on the dataframe for exact matches
+#   5. Runs embedding-based semantic search for the top 10 similar records
+#   6. Combines both result sets, removing duplicates
+#   7. For large result sets, summarizes records by grouping titles
+#   8. For aggregate questions: includes dataset summary statistics
+#   9. For specific questions: labels the best match separately
+#  10. Returns the context string and metadata for the streaming LLM call
 # =============================================================================
 TOP_K = 10
 
 
-def retrieve_context(question):
-    corrected = correct_query(question)
-    is_agg = is_aggregate_question(corrected)
+def _run_retrieval(query):
+    """Inner retrieval: keyword lookup + embedding search. Returns
+    (lookup_texts, embedding_records, top_score)."""
+    corrected = correct_query(query)
 
     lookup_matches = lookup_records(corrected)
     lookup_texts = [row_to_text(row) for _, row in lookup_matches.iterrows()]
@@ -411,8 +453,27 @@ def retrieve_context(question):
     scores = util.cos_sim(q_embedding, row_embeddings)[0]
     top_indices = scores.topk(k=min(TOP_K, len(row_sentences))).indices.tolist()
     top_score = scores[top_indices[0]].item()
-
     embedding_records = [row_sentences[i] for i in top_indices]
+
+    return lookup_texts, embedding_records, top_score, corrected
+
+
+def retrieve_context(question, messages=None):
+    # First pass: try with follow-up resolution
+    search_query = resolve_follow_up(question, messages or [])
+    lookup_texts, embedding_records, top_score, corrected = _run_retrieval(search_query)
+
+    # Fallback: if confidence is low and we have chat history, retry with
+    # the previous question prepended (catches follow-ups that the indicator
+    # list missed, like "so can you tell me 2 of the highest ones?")
+    if top_score < 0.3 and messages and search_query == question:
+        for msg in reversed(messages):
+            if msg["role"] == "user":
+                enriched = f"{msg['content']} {question}"
+                lookup_texts, embedding_records, top_score, corrected = _run_retrieval(enriched)
+                break
+
+    is_agg = is_aggregate_question(corrected)
 
     all_records = lookup_texts + [r for r in embedding_records if r not in lookup_texts]
 
@@ -485,7 +546,9 @@ if user_question:
 
     # Retrieve context and stream response
     with st.chat_message("assistant"):
-        context, score, corrected, is_agg = retrieve_context(user_question)
+        context, score, corrected, is_agg = retrieve_context(
+            user_question, st.session_state.messages[:-1]
+        )
 
         # Notify if spell correction changed the query
         if corrected.lower() != user_question.lower():
