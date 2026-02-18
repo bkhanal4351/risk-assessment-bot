@@ -152,6 +152,19 @@ risk_assessment_bot/
 - Python 3.10+
 - A Groq API key (free at https://console.groq.com)
 
+### Why Use a Virtual Environment?
+
+A virtual environment (`venv`) creates an isolated Python installation for this project so its dependencies (PyTorch, Streamlit, sentence-transformers, etc.) don't conflict with packages installed globally or by other projects. Without one, installing this project's requirements could upgrade or downgrade packages that another project depends on, causing hard-to-debug breakage.
+
+**Alternatives to `venv`:**
+
+- **`conda`** (Anaconda/Miniconda): Full environment manager that also handles non-Python dependencies. Use `conda create -n risk_bot python=3.10` then `conda activate risk_bot`.
+- **`poetry`**: Manages dependencies and virtual environments together via `pyproject.toml`. Use `poetry install` instead of `pip install -r requirements.txt`.
+- **`pipenv`**: Combines `pip` and `venv` into a single workflow with a `Pipfile.lock` for reproducibility. Use `pipenv install -r requirements.txt`.
+- **Docker**: Containerizes the entire app and its dependencies. Eliminates "works on my machine" issues entirely, especially useful for VDI or server deployments.
+
+If you choose not to use any virtual environment, you can skip step 2 in the setup instructions below and install directly with `pip install -r requirements.txt` — but this is not recommended for the reasons above.
+
 ### macOS / Linux
 
 1. Clone the repository:

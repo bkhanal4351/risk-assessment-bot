@@ -269,11 +269,18 @@ SYSTEM_PROMPT = (
     "- **Primary Control** (type): full description\n"
     "- **Secondary Control** (type): full description\n\n"
     "## Other Controls to Consider\n"
-    "Briefly list any other matching records with their "
-    "primary and secondary control types and descriptions.\n\n"
-    "IMPORTANT: Always include BOTH the control type AND the full "
-    "control description for primary and secondary controls. "
-    "Never omit secondary control details.\n"
+    "List any other matching records. For EACH record, always use "
+    "the exact bold labels **Primary Control** and **Secondary Control** "
+    "followed by the control type in parentheses and the full description. "
+    "Example format for each record:\n"
+    "- **Risk Title**: title — **Risk Level**: level\n"
+    "  - **Primary Control** (type): description\n"
+    "  - **Secondary Control** (type): description\n\n"
+    "IMPORTANT: The words 'Primary Control' and 'Secondary Control' "
+    "must ALWAYS be bold (**Primary Control**, **Secondary Control**) "
+    "in every section of the response — both Best Match and Other "
+    "Controls to Consider. Always include the control type AND the "
+    "full control description. Never omit secondary control details.\n"
     "Users may have typos or use informal terms — interpret their "
     "intent and match to the closest relevant records. For example, "
     "'hazadorus materials' should match 'Hazardous Waste Mishandling'. "
@@ -529,6 +536,15 @@ def retrieve_context(question, messages=None):
 #   - Streaming LLM responses displayed in real-time as tokens arrive
 #   - st.chat_input and st.chat_message for a native chat experience
 # =============================================================================
+# Increase font size in chat responses by ~3px (default is ~14px)
+st.markdown("""
+<style>
+    .stChatMessage p, .stChatMessage li, .stChatMessage td {
+        font-size: 17px !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 st.title("EPA Risk Assessment Assistant")
 st.caption("Ask questions about risks, controls, and mitigations from the EPA Risk and Control Registry.")
 
