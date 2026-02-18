@@ -11,6 +11,7 @@ A Streamlit-powered chatbot that lets users ask natural language questions about
 - **Follow-up Detection**: Detects conversational follow-ups and enriches the search with prior context, with a low-confidence fallback retry
 - **Streaming Responses**: LLM answers stream in real-time as tokens are generated
 - **Confidence Scoring**: Color-coded relevance labels (High/Moderate/Low) based on cosine similarity
+- **Source Citations**: Collapsible "Sources from Registry" panel showing the top 5 matched CSV rows with row numbers, risk titles, and similarity scores for full traceability
 - **Example Questions**: Clickable example buttons for new users to get started quickly
 - **Large Result Summarization**: Groups duplicate risk titles and shows counts when result sets are large
 
@@ -64,7 +65,7 @@ User Question
         - Description keywords (fallback, requires 2+ word overlap)
 
    b) SEMANTIC SEARCH (embedding similarity)
-      Encodes the question into a 384-dim vector using all-MiniLM-L6-v2
+      Encodes the question into a 768-dim vector using BAAI/bge-base-en-v1.5
       and computes cosine similarity against all pre-computed record vectors.
       Returns top 10 most similar records.
       |
@@ -95,7 +96,7 @@ User Question
 |-----------|-----------|--------------|
 | Cosine Similarity | Semantic search | Measures angle between question vector and record vectors. Score 1.0 = identical meaning, 0.0 = unrelated. Used to rank the top 10 most relevant records. |
 | SequenceMatcher (difflib) | Spell correction | Finds the longest contiguous matching subsequence between the user's word and vocabulary words. Ratio = 2 * matches / total_chars. Threshold 0.8 means 80%+ character overlap required. |
-| Sentence Embedding (all-MiniLM-L6-v2) | Vector encoding | Transformer model that maps text to 384-dimensional dense vectors where semantically similar sentences are close together. Pre-trained on 1B+ sentence pairs. |
+| Sentence Embedding (BAAI/bge-base-en-v1.5) | Vector encoding | Transformer model that maps text to 768-dimensional dense vectors where semantically similar sentences are close together. Top-ranked on the MTEB retrieval benchmark. |
 | TF-style Keyword Matching | Keyword lookup | Exact substring matching against pre-computed lowercase columns. Fast O(n) scan with set-based index collection instead of DataFrame concatenation. |
 
 ### Why Dual Search?
@@ -126,7 +127,7 @@ The app uses `Epa risk and control registry.csv` which contains 1,650 risk recor
 | Technology | Purpose |
 |------------|---------|
 | Streamlit | Web UI framework with chat interface |
-| Sentence Transformers | Embedding model (`all-MiniLM-L6-v2`) for semantic search |
+| Sentence Transformers | Embedding model (`BAAI/bge-base-en-v1.5`) for semantic search |
 | Groq | LLM API provider for fast streaming inference |
 | Llama 3.3 70B | Large language model for generating answers |
 | Pandas | Data loading and manipulation |
@@ -347,6 +348,16 @@ For specific risk questions, the assistant responds with:
 
 For aggregate questions, the assistant provides counts, breakdowns, and summaries from the full dataset.
 
+### Sources from Registry
+
+Every answer includes a collapsible "Sources from Registry" panel that shows the top 5 CSV rows the system matched against, ranked by similarity score. Each entry displays:
+
+- **Row number** (1-indexed, matching the CSV/Excel row for easy lookup)
+- **Risk title** from that row
+- **Similarity score** (cosine similarity rounded to 2 decimal places)
+
+This lets users trace any answer back to the exact records in the registry and verify the information independently.
+
 ## Architecture Diagram
 
 ```
@@ -377,8 +388,8 @@ User Question
 +---------------------+     +----------------------+
 |  Keyword Lookup     |     |  Semantic Search     |
 |  (pre-computed      |     |  (cosine similarity  |
-|   lowercase cols,   |     |   using MiniLM-L6    |
-|   2+ word matching) |     |   384-dim vectors)   |
+|   lowercase cols,   |     |   using BGE-base     |
+|   2+ word matching) |     |   768-dim vectors)   |
 +---------------------+     +----------------------+
       |                           |
       +--------+------------------+
@@ -408,7 +419,7 @@ User Question
 
 | Setting | Value | Defined In |
 |---------|-------|------------|
-| Embedding Model | all-MiniLM-L6-v2 | `load_model_and_embeddings()` |
+| Embedding Model | BAAI/bge-base-en-v1.5 (768-dim) | `load_model_and_embeddings()` |
 | LLM Model | llama-3.3-70b-versatile | `ask_llm_stream()` |
 | Top K Results | 10 | `TOP_K` constant |
 | LLM Temperature | 0.1 | `ask_llm_stream()` |
@@ -429,7 +440,7 @@ User Question
 | `GROQ_API_KEY not found` | Create a `.env` file with `GROQ_API_KEY=your_key` or set it in Streamlit Cloud secrets |
 | `streamlit: command not found` | Use `python -m streamlit run app.py` instead |
 | PyTorch installation fails on Windows | Install CPU version: `pip install torch --index-url https://download.pytorch.org/whl/cpu` |
-| App is slow on first load | The embedding model downloads on first run (~80MB). Subsequent runs use the cached model. |
+| App is slow on first load | The embedding model downloads on first run (~110MB for BGE-base). Subsequent runs use the cached model. |
 | Low relevance scores on follow-up questions | The app auto-retries with context from your previous question. Try rephrasing with more specific terms. |
 | `ModuleNotFoundError` | Make sure you activated the virtual environment and ran `pip install -r requirements.txt` |
 
@@ -469,7 +480,7 @@ The current architecture is designed for small-to-medium usage (single Streamlit
 
 4. **Implement rate limiting and authentication**: Add API key or OAuth-based authentication. Rate-limit per user to prevent abuse and stay within LLM provider quotas.
 
-5. **Use horizontal scaling**: Deploy multiple app instances behind a load balancer. Since each instance loads its own embedding model (~80MB), consider a shared model server to reduce total memory footprint.
+5. **Use horizontal scaling**: Deploy multiple app instances behind a load balancer. Since each instance loads its own embedding model (~110MB), consider a shared model server to reduce total memory footprint.
 
 ### Estimated Resource Requirements (10k concurrent users)
 

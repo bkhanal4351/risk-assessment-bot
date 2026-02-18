@@ -136,15 +136,17 @@ def correct_query(question):
 
 # =============================================================================
 # EMBEDDING MODEL AND VECTOR COMPUTATION (CACHED WITH CHANGE DETECTION)
-# Loads the all-MiniLM-L6-v2 sentence transformer model which converts text
-# into 384-dimensional vectors. Encodes every row sentence into a tensor so
-# we can compute cosine similarity between user questions and risk records.
+# Loads the BAAI/bge-base-en-v1.5 sentence transformer model which converts
+# text into 768-dimensional vectors. This model outperforms MiniLM-L6-v2 on
+# retrieval benchmarks (MTEB) while remaining small enough for free-tier
+# deployments (~110MB). Encodes every row sentence into a tensor so we can
+# compute cosine similarity between user questions and risk records.
 # @st.cache_resource keeps the model and embeddings in memory across reruns.
 # The csv_hash parameter ensures embeddings are recomputed when the CSV changes.
 # =============================================================================
 @st.cache_resource
 def load_model_and_embeddings(csv_hash):
-    model = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
+    model = SentenceTransformer('BAAI/bge-base-en-v1.5', device='cpu')
     embeddings = model.encode(row_sentences, convert_to_tensor=True)
     return model, embeddings
 
@@ -402,7 +404,7 @@ def summarize_records(records_text, max_individual=15):
 # =============================================================================
 # CONFIDENCE LABEL
 # Converts the raw cosine similarity score into a human-readable label with
-# color coding. Thresholds are based on typical all-MiniLM-L6-v2 score
+# color coding. Thresholds are based on typical BGE-base score
 # distributions:
 #   0.6+  = High relevance (strong semantic match)
 #   0.4+  = Moderate relevance (related topic)
@@ -474,7 +476,9 @@ TOP_K = 10
 
 def _run_retrieval(query):
     """Inner retrieval: keyword lookup + embedding search. Returns
-    (lookup_texts, embedding_records, top_score)."""
+    (lookup_texts, embedding_records, top_score, corrected, sources).
+    sources is a list of (row_index, risk_title, score) tuples for the
+    top 5 embedding matches, used to show source citations in the UI."""
     corrected = correct_query(query)
 
     lookup_matches = lookup_records(corrected)
@@ -482,17 +486,26 @@ def _run_retrieval(query):
 
     q_embedding = embedding_model.encode(corrected, convert_to_tensor=True)
     scores = util.cos_sim(q_embedding, row_embeddings)[0]
-    top_indices = scores.topk(k=min(TOP_K, len(row_sentences))).indices.tolist()
-    top_score = scores[top_indices[0]].item()
+    top_results = scores.topk(k=min(TOP_K, len(row_sentences)))
+    top_indices = top_results.indices.tolist()
+    top_scores = top_results.values.tolist()
+    top_score = top_scores[0]
     embedding_records = [row_sentences[i] for i in top_indices]
 
-    return lookup_texts, embedding_records, top_score, corrected
+    # Build source citations: top 5 matches with row number, title, and score
+    sources = []
+    for idx, sim_score in zip(top_indices[:5], top_scores[:5]):
+        row_num = idx + 1  # 1-indexed for Excel compatibility
+        title = df.iloc[idx]['risk_title']
+        sources.append((row_num, title, round(sim_score, 2)))
+
+    return lookup_texts, embedding_records, top_score, corrected, sources
 
 
 def retrieve_context(question, messages=None):
     # First pass: try with follow-up resolution
     search_query = resolve_follow_up(question, messages or [])
-    lookup_texts, embedding_records, top_score, corrected = _run_retrieval(search_query)
+    lookup_texts, embedding_records, top_score, corrected, sources = _run_retrieval(search_query)
 
     # Fallback: if confidence is low and we have chat history, retry with
     # the previous question prepended (catches follow-ups that the indicator
@@ -501,7 +514,7 @@ def retrieve_context(question, messages=None):
         for msg in reversed(messages):
             if msg["role"] == "user":
                 enriched = f"{msg['content']} {question}"
-                lookup_texts, embedding_records, top_score, corrected = _run_retrieval(enriched)
+                lookup_texts, embedding_records, top_score, corrected, sources = _run_retrieval(enriched)
                 break
 
     is_agg = is_aggregate_question(corrected)
@@ -523,7 +536,7 @@ def retrieve_context(question, messages=None):
             other_text = summarize_records(other_records)
             context += f"\n\nOTHER RELATED RECORDS ({len(other_records)}):\n{other_text}"
 
-    return context, top_score, corrected, is_agg
+    return context, top_score, corrected, is_agg, sources
 
 
 # =============================================================================
@@ -586,7 +599,7 @@ if user_question:
 
     # Retrieve context and stream response
     with st.chat_message("assistant"):
-        context, score, corrected, is_agg = retrieve_context(
+        context, score, corrected, is_agg, sources = retrieve_context(
             user_question, st.session_state.messages[:-1]
         )
 
@@ -608,5 +621,11 @@ if user_question:
         response_text = st.write_stream(
             ask_llm_stream(user_question, context, chat_history)
         )
+
+        # Show source citations in a collapsible expander
+        if sources:
+            with st.expander("Sources from Registry"):
+                for rank, (row_num, title, sim_score) in enumerate(sources, 1):
+                    st.markdown(f"**#{rank}** | Row {row_num} | {title} | Score: {sim_score}")
 
     st.session_state.messages.append({"role": "assistant", "content": response_text})
