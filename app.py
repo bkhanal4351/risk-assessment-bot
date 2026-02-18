@@ -1,4 +1,5 @@
 import os
+import hashlib
 import difflib
 import pandas as pd
 import streamlit as st
@@ -27,18 +28,40 @@ def row_to_text(row):
 
 
 # =============================================================================
-# DATA LOADING (CACHED)
+# CSV FILE HASH (CHANGE DETECTION)
+# Computes a SHA-256 hash of the CSV file contents. This hash is passed as a
+# parameter to all @st.cache_data and @st.cache_resource functions so that
+# Streamlit automatically invalidates and recomputes caches whenever the
+# underlying data file changes. Without this, cached functions would only
+# rerun when the function code itself changes, silently ignoring data updates.
+# =============================================================================
+CSV_PATH = "Epa risk and control registry.csv"
+
+
+def _get_csv_hash():
+    """Computes SHA-256 of the CSV file. Called on every app rerun (cheap I/O
+    operation) so that downstream caches detect data changes immediately."""
+    with open(CSV_PATH, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+csv_hash = _get_csv_hash()
+
+
+# =============================================================================
+# DATA LOADING (CACHED WITH CHANGE DETECTION)
 # Reads the EPA Risk and Control Registry CSV file and standardizes all column
 # names to lowercase with underscores for consistent access throughout the app.
 # Fills NaN values in optional secondary control columns with "N/A" so text
 # formatting does not break. Pre-computes lowercase columns for faster keyword
 # lookups (avoids calling .str.lower() on every query). Also pre-computes the
 # text sentences for every row.
-# Decorated with @st.cache_data so this only runs once, not on every rerun.
+# Decorated with @st.cache_data so this only runs once per data file version.
+# The csv_hash parameter triggers cache invalidation when the CSV changes.
 # =============================================================================
 @st.cache_data
-def load_data():
-    df = pd.read_csv("Epa risk and control registry.csv")
+def load_data(csv_hash):
+    df = pd.read_csv(CSV_PATH)
     df.rename(columns={
         "Risk Title": "risk_title",
         "Risk Statement/Description": "risk_description",
@@ -61,7 +84,7 @@ def load_data():
     return df, sentences
 
 
-df, row_sentences = load_data()
+df, row_sentences = load_data(csv_hash)
 
 
 # =============================================================================
@@ -73,7 +96,7 @@ df, row_sentences = load_data()
 # words and correctly spelled words are left untouched.
 # =============================================================================
 @st.cache_data
-def build_vocabulary():
+def build_vocabulary(csv_hash):
     vocab = set()
     for title in df['risk_title'].dropna().unique():
         vocab.update(w.lower() for w in title.split() if len(w) > 3)
@@ -88,7 +111,7 @@ def build_vocabulary():
     return list(vocab)
 
 
-vocabulary = build_vocabulary()
+vocabulary = build_vocabulary(csv_hash)
 
 
 def correct_query(question):
@@ -112,20 +135,21 @@ def correct_query(question):
 
 
 # =============================================================================
-# EMBEDDING MODEL AND VECTOR COMPUTATION (CACHED)
+# EMBEDDING MODEL AND VECTOR COMPUTATION (CACHED WITH CHANGE DETECTION)
 # Loads the all-MiniLM-L6-v2 sentence transformer model which converts text
 # into 384-dimensional vectors. Encodes every row sentence into a tensor so
 # we can compute cosine similarity between user questions and risk records.
 # @st.cache_resource keeps the model and embeddings in memory across reruns.
+# The csv_hash parameter ensures embeddings are recomputed when the CSV changes.
 # =============================================================================
 @st.cache_resource
-def load_model_and_embeddings(_sentences):
+def load_model_and_embeddings(csv_hash):
     model = SentenceTransformer('all-MiniLM-L6-v2', device='cpu')
-    embeddings = model.encode(list(_sentences), convert_to_tensor=True)
+    embeddings = model.encode(row_sentences, convert_to_tensor=True)
     return model, embeddings
 
 
-embedding_model, row_embeddings = load_model_and_embeddings(tuple(row_sentences))
+embedding_model, row_embeddings = load_model_and_embeddings(csv_hash)
 
 
 # =============================================================================
@@ -137,7 +161,7 @@ embedding_model, row_embeddings = load_model_and_embeddings(tuple(row_sentences)
 # so the LLM can answer from stats without needing to see every record.
 # =============================================================================
 @st.cache_data
-def build_summary():
+def build_summary(csv_hash):
     lines = []
     lines.append(f"Total risks in registry: {len(df)}")
 
@@ -166,7 +190,7 @@ def build_summary():
     return "\n".join(lines)
 
 
-data_summary = build_summary()
+data_summary = build_summary(csv_hash)
 
 
 # =============================================================================

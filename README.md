@@ -241,6 +241,53 @@ GROQ_API_KEY = "your_groq_api_key_here"
 
 The app will be live at a URL like `https://your-app-name.streamlit.app`
 
+### Running on a VDI (Virtual Desktop Infrastructure)
+
+If you are running on a corporate VDI or locked-down environment where you cannot deploy to Streamlit Cloud, you can run the app locally as a standalone server that other users on the same network can access.
+
+1. Follow the **macOS / Linux** or **Windows** setup steps above to install dependencies.
+
+2. Set the Groq API key as an environment variable (if `.env` is not supported in your VDI):
+
+```bash
+# Linux / macOS
+export GROQ_API_KEY=your_groq_api_key_here
+
+# Windows (Command Prompt)
+set GROQ_API_KEY=your_groq_api_key_here
+
+# Windows (PowerShell)
+$env:GROQ_API_KEY="your_groq_api_key_here"
+```
+
+3. Start the app and bind it to all network interfaces so other VDI users can connect:
+
+```bash
+streamlit run app.py --server.address 0.0.0.0 --server.port 8501
+```
+
+4. Other users on the same network can access the app at `http://<your-vdi-ip>:8501`. Find your IP with:
+
+```bash
+# Linux / macOS
+hostname -I
+
+# Windows
+ipconfig
+```
+
+**VDI Notes:**
+
+- If your VDI blocks outbound internet, you will need to pre-download the embedding model and Groq API access may require a proxy. Set `HTTPS_PROXY` if needed.
+- If port 8501 is blocked by firewall, try a different port: `--server.port 8080`
+- For headless VDIs with no browser, use `--server.headless true` to suppress the auto-open behavior.
+- If Python is not available on the VDI, ask IT to install Python 3.10+ or use a portable Python distribution.
+- To keep the app running after you close your terminal, use `nohup` (Linux) or run it as a background service:
+
+```bash
+nohup streamlit run app.py --server.address 0.0.0.0 --server.port 8501 > app.log 2>&1 &
+```
+
 ## Example Questions
 
 ### Specific Risk Lookups
@@ -346,20 +393,21 @@ User Question
 
 ## Configuration
 
-| Setting | Value | Location |
-|---------|-------|----------|
-| Embedding Model | all-MiniLM-L6-v2 | `app.py` |
-| LLM Model | llama-3.3-70b-versatile | `app.py` |
-| Top K Results | 10 | `app.py` |
-| LLM Temperature | 0.1 | `app.py` |
-| Max Tokens | 1500 | `app.py` |
-| Max Records to LLM | 50 | `app.py` |
-| Spell Correction Cutoff | 0.8 | `app.py` |
-| Spell Correction Length Tolerance | ±2 chars | `app.py` |
-| Low Confidence Fallback Threshold | 0.3 | `app.py` |
-| Chat History Window | Last 3 exchanges (6 messages) | `app.py` |
-| Record Summarization Threshold | 15 records | `app.py` |
-| Follow-up Word Count Threshold | < 8 words | `app.py` |
+| Setting | Value | Defined In |
+|---------|-------|------------|
+| Embedding Model | all-MiniLM-L6-v2 | `load_model_and_embeddings()` |
+| LLM Model | llama-3.3-70b-versatile | `ask_llm_stream()` |
+| Top K Results | 10 | `TOP_K` constant |
+| LLM Temperature | 0.1 | `ask_llm_stream()` |
+| Max Tokens | 1500 | `ask_llm_stream()` |
+| Max Records to LLM | 50 | `retrieve_context()` |
+| Spell Correction Cutoff | 0.8 | `correct_query()` via `difflib.get_close_matches()` |
+| Spell Correction Length Tolerance | ±2 chars | `correct_query()` length check |
+| Low Confidence Fallback Threshold | 0.3 | `retrieve_context()` fallback condition |
+| Chat History Window | Last 3 exchanges (6 messages) | `ask_llm_stream()` slicing `chat_history[-6:]` |
+| Record Summarization Threshold | 15 records | `summarize_records()` `max_individual` parameter |
+| Follow-up Word Count Threshold | < 8 words | `resolve_follow_up()` word count check |
+| CSV Change Detection | SHA-256 hash | `_get_csv_hash()` passed to all cached functions |
 
 ## Troubleshooting
 
@@ -374,7 +422,57 @@ User Question
 
 ## Known Limitations
 
-- **No cross-encoder re-ranking**: The "best match" is based on cosine similarity or keyword match order, not a dedicated relevance model. Adding a cross-encoder would improve accuracy but exceed free-tier memory limits.
-- **CSV-based data**: Data updates require replacing the CSV and redeploying. No admin UI for CRUD operations.
-- **Spell correction scope**: Only corrects words to terms found in the dataset. General English typos (e.g., "waht" -> "what") are not corrected.
-- **Context window**: Very large aggregate queries may truncate at 50 records and 1,500 tokens.
+- **No cross-encoder re-ranking**: The "best match" is based on cosine similarity or keyword match order, not a dedicated relevance model. Adding a cross-encoder would improve accuracy but increase memory usage.
+- **CSV-based data**: Data updates require replacing the CSV file. The app auto-detects changes via `_get_csv_hash()` and recomputes embeddings, but there is no admin UI for CRUD operations.
+- **Spell correction scope**: Only corrects words to terms found in the dataset vocabulary. General English typos (e.g., "waht" -> "what") are not corrected.
+- **Context window**: Very large aggregate queries may truncate at 50 records and 1,500 tokens (configured in `retrieve_context()` and `ask_llm_stream()`).
+- **Single-process architecture**: Streamlit runs as a single Python process. Each user session shares the same in-memory model and embeddings, which is efficient for memory but limits CPU-bound concurrency.
+- **Groq API rate limits**: The free Groq tier has request-per-minute and token-per-minute limits. Under heavy concurrent usage, some requests may be throttled or return rate-limit errors.
+- **No authentication**: The app has no login or role-based access control. Anyone with the URL can access the full registry.
+- **No persistent chat storage**: Chat history lives in `st.session_state` (browser tab memory). Refreshing the page or opening a new tab clears all conversation history.
+
+## Scaling Recommendations (10,000+ Concurrent Users)
+
+The current architecture is designed for small-to-medium usage (single Streamlit process, in-memory embeddings, direct Groq API calls). If usage grows beyond 10,000 concurrent users, the following changes are recommended.
+
+### Infrastructure
+
+| Concern | Current State | Recommendation |
+| ------- | ------------- | -------------- |
+| Web server | Single Streamlit process | Deploy behind a load balancer (NGINX, AWS ALB) with multiple Streamlit instances |
+| Embedding model | Loaded in each process | Move to a shared embedding service (e.g., Triton Inference Server, TorchServe, or a dedicated FastAPI microservice) |
+| Data storage | CSV file on disk | Migrate to a vector database (Pinecone, Weaviate, Qdrant, or pgvector) for scalable similarity search |
+| LLM provider | Groq free tier | Upgrade to Groq paid tier, or use multiple LLM providers with failover (OpenAI, Anthropic, Azure OpenAI) |
+| Caching | Streamlit in-memory cache | Add Redis or Memcached for shared query-result caching across instances |
+| Session storage | `st.session_state` (per-tab) | Use Redis-backed session store or a database for persistent chat history |
+
+### Architecture Changes
+
+1. **Separate the frontend from the backend**: Extract the RAG pipeline (`_run_retrieval()`, `retrieve_context()`, `ask_llm_stream()`) into a standalone FastAPI or Flask service. The Streamlit UI becomes a thin client that calls the API. This allows scaling the backend independently.
+
+2. **Pre-compute and index embeddings externally**: Instead of encoding all rows on startup via `load_model_and_embeddings()`, store pre-computed vectors in a vector database. This eliminates startup latency and supports datasets much larger than 1,650 records.
+
+3. **Add a request queue for LLM calls**: At 10k+ users, LLM calls become the bottleneck. Use a message queue (RabbitMQ, Redis Streams, or AWS SQS) to manage requests and prevent overloading the LLM provider.
+
+4. **Implement rate limiting and authentication**: Add API key or OAuth-based authentication. Rate-limit per user to prevent abuse and stay within LLM provider quotas.
+
+5. **Use horizontal scaling**: Deploy multiple app instances behind a load balancer. Since each instance loads its own embedding model (~80MB), consider a shared model server to reduce total memory footprint.
+
+### Estimated Resource Requirements (10k concurrent users)
+
+| Resource | Estimate |
+| -------- | -------- |
+| App instances | 5-10 Streamlit workers (or FastAPI equivalents) behind a load balancer |
+| Memory per instance | ~500MB (embedding model + DataFrame + PyTorch) |
+| Vector database | Any managed service (Pinecone Starter, Qdrant Cloud, or self-hosted pgvector) |
+| LLM API throughput | ~100-500 requests/min depending on user activity patterns |
+| Redis cache | 1-2 GB for query caching and session storage |
+
+### Quick Wins (No Architecture Change)
+
+If you need to handle moderate growth (hundreds of users) before a full rewrite:
+
+- **Groq paid tier**: Removes rate limits, the single biggest bottleneck for concurrent users.
+- **Streamlit Community Cloud scaling**: Supports multiple simultaneous sessions out of the box, though with shared CPU.
+- **Response caching**: Cache LLM responses for repeated/similar queries using `@st.cache_data` with TTL, reducing redundant API calls.
+- **CDN for static assets**: If self-hosting, put Streamlit behind Cloudflare or AWS CloudFront to reduce server load from static file requests.
