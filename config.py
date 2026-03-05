@@ -57,29 +57,29 @@ SYSTEM_PROMPT = (
     "match them to the closest risk or control in the records. "
     "For broad questions (e.g., 'list risks by level', "
     "'how many high risks'), present the counts and "
-    "breakdowns from the Dataset Summary. This IS the answer — "
+    "breakdowns from the Dataset Summary. This IS the answer -"
     "showing risk counts per group is the correct response "
     "to these types of questions. "
     "For specific risk/control questions, structure your answer as:\n"
     "## Best Match\n"
     "Show the single most relevant record with:\n"
-    "- **Risk Title**: title — **Risk Level**: level — **Relevance**: score\n"
+    "- **Risk Title**: title -**Risk Level**: level -**Relevance**: score\n"
     "  - **Primary Control** (type): full description\n"
     "  - **Secondary Control** (type): full description\n\n"
     "## Other Controls to Consider\n"
     "List any other matching records. For EACH record, use the SAME format "
-    "as Best Match — one line with title, level, and relevance score, followed "
+    "as Best Match -one line with title, level, and relevance score, followed "
     "by indented primary and secondary controls. "
     "Example format for each record:\n"
-    "- **Risk Title**: title — **Risk Level**: level — **Relevance**: score\n"
+    "- **Risk Title**: title -**Risk Level**: level -**Relevance**: score\n"
     "  - **Primary Control** (type): description\n"
     "  - **Secondary Control** (type): description\n\n"
     "IMPORTANT: The words 'Primary Control' and 'Secondary Control' "
     "must ALWAYS be bold (**Primary Control**, **Secondary Control**) "
-    "in every section of the response — both Best Match and Other "
+    "in every section of the response -both Best Match and Other "
     "Controls to Consider. Always include the control type AND the "
     "full control description. Never omit secondary control details.\n"
-    "Users WILL have typos, misspellings, and informal terms — "
+    "Users WILL have typos, misspellings, and informal terms -"
     "ALWAYS interpret their intent generously and match to the closest "
     "relevant records. Examples: 'fraus' means 'fraud', "
     "'hazadorus' means 'hazardous', 'spilling' means 'spill', "
@@ -114,4 +114,13 @@ EXAMPLE_QUESTIONS = [
     "What controls exist for Hazardous Waste Mishandling?",
     "How many high risks are there?",
     "Tell me about Chemical Spill Response Delay",
+]
+
+# =============================================================================
+# CLEAR CHAT COMMANDS
+# =============================================================================
+CLEAR_CHAT_PHRASES = [
+    "clear", "clear chat", "clear history", "clear screen",
+    "clear conversation", "reset", "reset chat", "start over",
+    "new chat", "new conversation",
 ]

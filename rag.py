@@ -261,7 +261,7 @@ def lookup_records(question):
         if ctrl in q_lower:
             matched_indices.update(df.index[df['_primary_control_type_lower'] == ctrl])
 
-    # Common words that appear in many titles — not distinctive enough for 1-word match
+    # Common words that appear in many titles -not distinctive enough for 1-word match
     _common_title_words = {
         "risk", "control", "management", "system", "process", "data",
         "failure", "response", "delay", "lack", "loss", "review",
@@ -378,7 +378,7 @@ def retrieve_context(question):
         context_records = summarize_records(all_records, force_summary=True)
         context = (
             f"THIS IS AN AGGREGATE QUESTION. Present counts, totals, and "
-            f"breakdowns — do NOT use the Best Match / Other Controls format.\n\n"
+            f"breakdowns -do NOT use the Best Match / Other Controls format.\n\n"
             f"Dataset Summary:\n{data_summary}\n\n"
             f"Matching Records ({record_count} found):\n{context_records}"
         )
@@ -439,9 +439,9 @@ def load_recent_feedback():
         rating = row.get("rating", "")
         rating_label = "👍" if rating == "up" else "👎" if rating == "down" else str(rating)
         comment = str(row.get("comment", "")).strip()
-        entry = f"- Q: \"{row['question']}\" — Rated: {rating_label}"
+        entry = f"- Q: \"{row['question']}\" -Rated: {rating_label}"
         if comment and comment != "nan":
-            entry += f" — Comment: \"{comment}\""
+            entry += f" -Comment: \"{comment}\""
         lines.append(entry)
 
     return "\n".join(lines)

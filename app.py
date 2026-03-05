@@ -5,6 +5,7 @@ import streamlit as st
 from config import (
     EXAMPLE_QUESTIONS, CHAT_FONT_SIZE_PX,
     APP_TITLE, APP_ICON, APP_DESCRIPTION,
+    CLEAR_CHAT_PHRASES,
 )
 
 st.set_page_config(
@@ -67,7 +68,7 @@ def _render_feedback(msg_index, message):
         comment = st.session_state.get(f"saved_comment_{msg_index}", "")
         label = f"Feedback recorded: {icon}"
         if comment:
-            label += f' — "{comment}"'
+            label += f' - "{comment}"'
         st.caption(label)
         return
 
@@ -139,6 +140,10 @@ user_question = st.chat_input("Ask a question about a risk or control...")
 if "pending_question" in st.session_state:
     user_question = st.session_state.pending_question
     del st.session_state.pending_question
+
+if user_question and user_question.strip().lower() in CLEAR_CHAT_PHRASES:
+    st.session_state.messages = []
+    st.rerun()
 
 if user_question:
     with st.chat_message("user"):

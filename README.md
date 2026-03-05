@@ -8,12 +8,13 @@ A Streamlit-powered chatbot that lets users ask natural language questions about
 - **User Feedback**: Thumbs up/down rating and optional comment box on every response, saved to CSV for continuous improvement
 - **Feedback-Informed Answers**: Past user ratings and comments are included in the LLM prompt to improve future responses
 - **Cosine Score Display**: Every record in the LLM response shows its cosine similarity score for transparency
-- **Typo-Tolerant Search**: Two-layer matching — prefix-based for inflected forms ("spill" matches "spilling") and Damerau-Levenshtein edit distance for transposition typos ("farud" matches "fraud")
+- **Typo-Tolerant Search**: Two-layer matching -prefix-based for inflected forms ("spill" matches "spilling") and Damerau-Levenshtein edit distance for transposition typos ("farud" matches "fraud")
 - **Dual Search Strategy**: Combines keyword-based lookup with embedding-based semantic search for better recall
 - **Smart Aggregate Detection**: Two-pass system that distinguishes between specific risk queries and analytical questions
 - **Streaming Responses**: LLM answers stream in real-time as tokens are generated
 - **Confidence Scoring**: Color-coded relevance labels (High/Moderate/Low) based on cosine similarity
 - **Source Citations**: Collapsible "Sources from Registry" panel showing the top 5 matched CSV rows with row numbers, risk titles, and similarity scores for full traceability
+- **Inline Clear Chat Commands**: Type "clear", "reset", "new chat", etc. directly in the chat input to reset the conversation -no need to reach for the sidebar button
 - **Sidebar with Examples**: Example question buttons in the sidebar for quick access, plus a "Clear Chat" button
 - **Large Result Summarization**: Groups duplicate risk titles and shows counts when result sets are large
 
@@ -137,7 +138,8 @@ The app uses `Epa risk and control registry.csv` which contains 1,650 risk recor
 risk_assessment_bot/
   config.py                           All constants, thresholds, prompts, and keyword lists
   rag.py                              RAG pipeline: data loading, retrieval, LLM, feedback
-  app.py                              Streamlit UI layer (sidebar, chat, feedback)
+  app.py                              Streamlit UI layer (sidebar, chat, feedback, clear commands)
+  DEMO_GUIDE.md                       Demo script and feature showcase for presentations
   Epa risk and control registry.csv   EPA risk and control dataset (1,650 records)
   feedback.csv                        User feedback log (created at runtime, gitignored)
   requirements.txt                    Python dependencies
@@ -165,7 +167,7 @@ A virtual environment (`venv`) creates an isolated Python installation for this 
 - **`pipenv`**: Combines `pip` and `venv` into a single workflow with a `Pipfile.lock` for reproducibility. Use `pipenv install -r requirements.txt`.
 - **Docker**: Containerizes the entire app and its dependencies. Eliminates "works on my machine" issues entirely, especially useful for VDI or server deployments.
 
-If you choose not to use any virtual environment, you can skip step 2 in the setup instructions below and install directly with `pip install -r requirements.txt` — but this is not recommended for the reasons above.
+If we choose not to use any virtual environment, we can skip step 2 in the setup instructions below and install directly with `pip install -r requirements.txt` -but this is not recommended for the reasons above.
 
 ### macOS / Linux
 
@@ -189,7 +191,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-4. Create a `.env` file and add your Groq API key:
+4. Create a `.env` file and add our Groq API key:
 
 ```
 GROQ_API_KEY=your_groq_api_key_here
@@ -201,7 +203,7 @@ GROQ_API_KEY=your_groq_api_key_here
 streamlit run app.py
 ```
 
-6. Open your browser to `http://localhost:8501`
+6. Open a browser to `http://localhost:8501`
 
 ### Windows
 
@@ -225,7 +227,7 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-4. Create a `.env` file in the project root and add your Groq API key:
+4. Create a `.env` file in the project root and add our Groq API key:
 
 ```
 GROQ_API_KEY=your_groq_api_key_here
@@ -237,16 +239,16 @@ GROQ_API_KEY=your_groq_api_key_here
 streamlit run app.py
 ```
 
-6. Open your browser to `http://localhost:8501`
+6. Open a browser to `http://localhost:8501`
 
 **Windows Notes:**
 - If `streamlit` is not recognized, try `python -m streamlit run app.py`
-- If you get a PyTorch error, install the CPU version: `pip install torch --index-url https://download.pytorch.org/whl/cpu`
-- Make sure your `.env` file uses UTF-8 encoding (not UTF-16)
+- If we get a PyTorch error, install the CPU version: `pip install torch --index-url https://download.pytorch.org/whl/cpu`
+- Make sure the `.env` file uses UTF-8 encoding (not UTF-16)
 
 ### Deploying to Streamlit Cloud
 
-1. Push your repo to GitHub (make sure `.env` is in `.gitignore`)
+1. Push the repo to GitHub (make sure `.env` is in `.gitignore`)
 2. Go to [share.streamlit.io](https://share.streamlit.io) and deploy the repo
 3. In app settings, go to **Secrets** and add:
 
@@ -254,15 +256,15 @@ streamlit run app.py
 GROQ_API_KEY = "your_groq_api_key_here"
 ```
 
-The app will be live at a URL like `https://your-app-name.streamlit.app`
+The app will be live at a URL like `https://our-app-name.streamlit.app`
 
 ### Running on a VDI (Virtual Desktop Infrastructure)
 
-If you are running on a corporate VDI or locked-down environment where you cannot deploy to Streamlit Cloud, you can run the app locally as a standalone server that other users on the same network can access.
+If we are running on a corporate VDI or locked-down environment where we cannot deploy to Streamlit Cloud, we can run the app locally as a standalone server that other users on the same network can access.
 
 1. Follow the **macOS / Linux** or **Windows** setup steps above to install dependencies.
 
-2. Set the Groq API key as an environment variable (if `.env` is not supported in your VDI):
+2. Set the Groq API key as an environment variable (if `.env` is not supported in our VDI):
 
 ```bash
 # Linux / macOS
@@ -281,7 +283,7 @@ $env:GROQ_API_KEY="your_groq_api_key_here"
 streamlit run app.py --server.address 0.0.0.0 --server.port 8501
 ```
 
-4. Other users on the same network can access the app at `http://<your-vdi-ip>:8501`. Find your IP with:
+4. Other users on the same network can access the app at `http://<our-vdi-ip>:8501`. Find the IP with:
 
 ```bash
 # Linux / macOS
@@ -293,11 +295,11 @@ ipconfig
 
 **VDI Notes:**
 
-- If your VDI blocks outbound internet, you will need to pre-download the embedding model and Groq API access may require a proxy. Set `HTTPS_PROXY` if needed.
+- If our VDI blocks outbound internet, we will need to pre-download the embedding model and Groq API access may require a proxy. Set `HTTPS_PROXY` if needed.
 - If port 8501 is blocked by firewall, try a different port: `--server.port 8080`
 - For headless VDIs with no browser, use `--server.headless true` to suppress the auto-open behavior.
 - If Python is not available on the VDI, ask IT to install Python 3.10+ or use a portable Python distribution.
-- To keep the app running after you close your terminal, use `nohup` (Linux) or run it as a background service:
+- To keep the app running after we close the terminal, use `nohup` (Linux) or run it as a background service:
 
 ```bash
 nohup streamlit run app.py --server.address 0.0.0.0 --server.port 8501 > app.log 2>&1 &
@@ -339,7 +341,7 @@ For specific risk questions, the assistant responds with:
 
 **Best Match**: The single most relevant record showing risk title, risk level, cosine score, primary control (type + description), and secondary control (type + description).
 
-**Other Controls to Consider**: Additional related records, each with the same format — risk title, risk level, cosine score, and both controls.
+**Other Controls to Consider**: Additional related records, each with the same format -risk title, risk level, cosine score, and both controls.
 
 Every record displays its **cosine similarity score** so users can gauge how relevant each match is.
 
@@ -409,11 +411,11 @@ The app includes a feedback loop that allows users to rate responses and have th
 
 Every assistant message displays three feedback elements simultaneously:
 
-1. **Thumbs Up (👍)** — Positive rating
-2. **Thumbs Down (👎)** — Negative rating
-3. **Optional Comment Box** — Free-text input for specific feedback (e.g., "Missing secondary controls", "Wrong risk matched")
+1. **Thumbs Up (👍)** -Positive rating
+2. **Thumbs Down (👎)** -Negative rating
+3. **Optional Comment Box** -Free-text input for specific feedback (e.g., "Missing secondary controls", "Wrong risk matched")
 
-The user types an optional comment, then clicks either 👍 or 👎 to submit. Both the rating and comment are saved together. Each message can only be rated once — after submission, the buttons are replaced with a read-only confirmation.
+The user types an optional comment, then clicks either 👍 or 👎 to submit. Both the rating and comment are saved together. Each message can only be rated once -after submission, the buttons are replaced with a read-only confirmation.
 
 ### How Feedback Is Stored
 
@@ -442,8 +444,8 @@ Example of what the LLM sees:
 
 ```text
 USER FEEDBACK ON PAST ANSWERS (use this to improve your response):
-- Q: "What controls for fraud?" — Rated: 👎 — Comment: "Missing secondary controls"
-- Q: "How many high risks?" — Rated: 👍
+- Q: "What controls for fraud?" -Rated: 👎 -Comment: "Missing secondary controls"
+- Q: "How many high risks?" -Rated: 👍
 
 BEST MATCH (Cosine Score: 0.72):
 Risk: Fraud Detection Failure. Description: ...
@@ -456,7 +458,7 @@ Question: What are the controls for fraud risk?
 - **Negative ratings with comments** cause the LLM to address those specific issues (e.g., including more detail on secondary controls)
 - **Positive ratings** reinforce the response style the LLM used
 - **Recency**: Only the last 10 entries are used, so behavior reflects recent satisfaction
-- **Scope**: Feedback affects LLM generation only — the retrieval pipeline (keyword + embedding search) is not modified by feedback
+- **Scope**: Feedback affects LLM generation only -the retrieval pipeline (keyword + embedding search) is not modified by feedback
 
 ## Configuration
 
@@ -472,6 +474,7 @@ Question: What are the controls for fraud risk?
 | Record Summarization Threshold | 15 records | `config.py` |
 | Feedback Lookback | 10 recent entries | `config.py` |
 | Feedback Storage | feedback.csv (local) | `config.py` |
+| Clear Chat Phrases | clear, reset, new chat, start over, etc. | `config.py` |
 | CSV Change Detection | SHA-256 hash | `rag.py` |
 
 ## Troubleshooting
@@ -483,7 +486,7 @@ Question: What are the controls for fraud risk?
 | PyTorch installation fails on Windows | Install CPU version: `pip install torch --index-url https://download.pytorch.org/whl/cpu` |
 | App is slow on first load | The embedding model downloads on first run (~110MB for BGE-base). Subsequent runs use the cached model. |
 | Feedback not saving | Check that the app has write permissions to the project directory for `feedback.csv`. |
-| `ModuleNotFoundError` | Make sure you activated the virtual environment and ran `pip install -r requirements.txt` |
+| `ModuleNotFoundError` | Make sure we activated the virtual environment and ran `pip install -r requirements.txt` |
 
 ## Known Limitations
 
@@ -535,7 +538,7 @@ The current architecture is designed for small-to-medium usage (single Streamlit
 
 ### Quick Wins (No Architecture Change)
 
-If you need to handle moderate growth (hundreds of users) before a full rewrite:
+If we need to handle moderate growth (hundreds of users) before a full rewrite:
 
 - **Groq paid tier**: Removes rate limits, the single biggest bottleneck for concurrent users.
 - **Streamlit Community Cloud scaling**: Supports multiple simultaneous sessions out of the box, though with shared CPU.

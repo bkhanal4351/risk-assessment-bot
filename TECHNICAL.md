@@ -1,4 +1,4 @@
-# Technical Documentation — EPA Risk Assessment Assistant
+# Technical Documentation -EPA Risk Assessment Assistant
 
 This document provides a line-by-line walkthrough of every module in the EPA Risk Assessment Assistant, covering algorithms, data structures, control flow, and design decisions.
 
@@ -23,7 +23,7 @@ This document provides a line-by-line walkthrough of every module in the EPA Ris
    - [Feedback UI](#feedback-ui)
    - [Source Citations](#source-citations)
    - [Main Chat Loop](#main-chat-loop)
-5. [Feedback Loop — Full Lifecycle](#feedback-loop--full-lifecycle)
+5. [Feedback Loop -Full Lifecycle](#feedback-loop--full-lifecycle)
    - [How Feedback Is Collected](#how-feedback-is-collected)
    - [How Feedback Is Stored](#how-feedback-is-stored)
    - [How Feedback Is Loaded](#how-feedback-is-loaded)
@@ -38,7 +38,7 @@ This document provides a line-by-line walkthrough of every module in the EPA Ris
    - [Distinctive Word Matching](#distinctive-word-matching)
    - [Record Summarization](#record-summarization)
    - [SHA-256 CSV Change Detection](#sha-256-csv-change-detection)
-7. [Data Flow — End to End](#data-flow--end-to-end)
+7. [Data Flow -End to End](#data-flow--end-to-end)
 8. [Caching Strategy](#caching-strategy)
 9. [Error Handling](#error-handling)
 10. [Session State Management](#session-state-management)
@@ -61,7 +61,7 @@ Data flows in one direction: **User Input → app.py → rag.py (retrieval + LLM
 
 ## Module: config.py
 
-`config.py` is a pure constants file — no logic, no imports, no side effects. Every tunable parameter lives here so the RAG pipeline and UI can be adjusted without modifying business logic.
+`config.py` is a pure constants file -no logic, no imports, no side effects. Every tunable parameter lives here so the RAG pipeline and UI can be adjusted without modifying business logic.
 
 ### Line-by-Line
 
@@ -139,7 +139,7 @@ Substring patterns checked against the lowercased user question in `is_aggregate
 The system prompt defines the LLM's persona, output format, and behavior rules. Key sections:
 
 1. **Role definition** (line 54): "You are an EPA risk assessment assistant."
-2. **Grounding rule** (line 55): "Answer questions using ONLY the risk and control data provided." — prevents hallucination from training data.
+2. **Grounding rule** (line 55): "Answer questions using ONLY the risk and control data provided." -prevents hallucination from training data.
 3. **Aggregate format** (lines 58-62): For broad questions, present counts and breakdowns.
 4. **Specific format** (lines 63-79): Structured output with Best Match (risk title, risk level, cosine score, primary/secondary controls) and Other Controls to Consider.
 5. **Bold formatting rule** (lines 80-84): Enforces consistent markdown bold labels for controls in every section.
@@ -161,16 +161,23 @@ APP_TITLE = "EPA Risk Assessment Assistant"
 APP_ICON = "shield"
 APP_DESCRIPTION = "..."
 EXAMPLE_QUESTIONS = [...]
+
+CLEAR_CHAT_PHRASES = [
+    "clear", "clear chat", "clear history", "clear screen",
+    "clear conversation", "reset", "reset chat", "start over",
+    "new chat", "new conversation",
+]
 ```
 - `CHAT_FONT_SIZE_PX`: Custom font size injected via CSS for readability.
 - `APP_TITLE` / `APP_ICON` / `APP_DESCRIPTION`: Used by `app.py` for `st.set_page_config()` and sidebar header.
 - `EXAMPLE_QUESTIONS`: Pre-defined questions shown as clickable buttons in the sidebar.
+- `CLEAR_CHAT_PHRASES`: List of phrases that, when typed in the chat input, clear the conversation instead of being sent through the RAG pipeline. Matched case-insensitively after stripping whitespace.
 
 ---
 
 ## Module: rag.py
 
-This is the core engine — ~410 lines covering data loading, dual retrieval, LLM generation, and feedback I/O.
+This is the core engine -~410 lines covering data loading, dual retrieval, LLM generation, and feedback I/O.
 
 ### Imports and Initialization
 
@@ -210,7 +217,7 @@ This must run before `_init_groq_client()` accesses `os.environ["GROQ_API_KEY"]`
 
 ### Helper Functions
 
-#### `row_to_text(row)` — Lines 26-35
+#### `row_to_text(row)` -Lines 26-35
 
 ```python
 def row_to_text(row):
@@ -229,7 +236,7 @@ def row_to_text(row):
 
 **Design decision**: A single sentence (not JSON or tabular format) is used because sentence transformers are trained on natural text and produce higher-quality embeddings for sentence-like inputs. The field labels (`Risk:`, `Description:`, etc.) help the LLM parse the structure.
 
-#### `confidence_label(score)` — Lines 38-45
+#### `confidence_label(score)` -Lines 38-45
 
 ```python
 def confidence_label(score):
@@ -245,7 +252,7 @@ def confidence_label(score):
 
 **Return**: Tuple `(label_string, color_string)`. The color string is used with Streamlit's `:{color}[text]` markdown syntax.
 
-#### `_damerau_levenshtein(s1, s2)` — Lines 48-66
+#### `_damerau_levenshtein(s1, s2)` -Lines 48-66
 
 ```python
 def _damerau_levenshtein(s1, s2):
@@ -280,7 +287,7 @@ Standard Levenshtein would count the "farud" → "fraud" transposition as 2 oper
 
 **Time complexity**: O(len1 × len2). For typical query words (4-15 chars), this is negligible.
 
-#### `_stem_match(word1, word2, min_chars=4, ratio=0.75)` — Lines 69-90
+#### `_stem_match(word1, word2, min_chars=4, ratio=0.75)` -Lines 69-90
 
 ```python
 def _stem_match(word1, word2, min_chars=4, ratio=0.75):
@@ -304,12 +311,12 @@ def _stem_match(word1, word2, min_chars=4, ratio=0.75):
 
 **Algorithm**: Two-layer fuzzy matching. First tries prefix matching for inflected forms, then falls back to Damerau-Levenshtein distance for transposition typos.
 
-**Layer 1 — Prefix match** (fast path):
+**Layer 1 -Prefix match** (fast path):
 1. If either word is shorter than `min_chars` (4), require exact equality. Prevents false positives like "is" matching "it".
 2. Count shared leading characters (`shared`).
 3. If `shared >= max(4, 75% of shorter word)`, return `True`.
 
-**Layer 2 — Edit distance fallback** (when prefix fails):
+**Layer 2 -Edit distance fallback** (when prefix fails):
 1. Reject if word lengths differ by more than 2 characters (prevents matching unrelated words of very different lengths).
 2. For short words (≤5 chars): allow Damerau-Levenshtein distance ≤ 1.
 3. For longer words (6+ chars): allow distance ≤ 2.
@@ -317,9 +324,9 @@ def _stem_match(word1, word2, min_chars=4, ratio=0.75):
 **Examples**:
 | word1 | word2 | Layer 1 (prefix) | Layer 2 (DL distance) | match? |
 |-------|-------|-------------------|----------------------|--------|
-| "spill" | "spilling" | shared=5, threshold=4 → Yes | — | Yes (prefix) |
-| "prevent" | "preventive" | shared=7, threshold=6 → Yes | — | Yes (prefix) |
-| "fraud" | "fraus" | shared=4, threshold=4 → Yes | — | Yes (prefix) |
+| "spill" | "spilling" | shared=5, threshold=4 → Yes | -| Yes (prefix) |
+| "prevent" | "preventive" | shared=7, threshold=6 → Yes | -| Yes (prefix) |
+| "fraud" | "fraus" | shared=4, threshold=4 → Yes | -| Yes (prefix) |
 | "farud" | "fraud" | shared=1, threshold=4 → No | DL=1, max=1 → Yes | Yes (edit dist) |
 | "enviroment" | "environment" | shared=6, threshold=8 → No | DL=1, max=2 → Yes | Yes (edit dist) |
 | "hazadorus" | "hazardous" | shared=3, threshold=7 → No | DL=2, max=2 → Yes | Yes (edit dist) |
@@ -328,9 +335,9 @@ def _stem_match(word1, word2, min_chars=4, ratio=0.75):
 
 **Why two layers?** Prefix matching is O(n) and handles the common case (inflected forms) efficiently. Edit distance is O(n²) but only runs when the prefix check fails. The length-difference guard and distance thresholds prevent false positives between unrelated words of similar length.
 
-**Why not use NLTK/SpaCy stemmers?** To avoid adding a heavy NLP dependency for a single function. The two-layer approach handles both inflections and typos — standard stemmers only handle inflections, not transposition typos like "farud" → "fraud".
+**Why not use NLTK/SpaCy stemmers?** To avoid adding a heavy NLP dependency for a single function. The two-layer approach handles both inflections and typos -standard stemmers only handle inflections, not transposition typos like "farud" → "fraud".
 
-#### `summarize_records(records_text, max_individual)` — Lines 64-85
+#### `summarize_records(records_text, max_individual)` -Lines 64-85
 
 ```python
 def summarize_records(records_text, max_individual=SUMMARIZATION_THRESHOLD):
@@ -367,7 +374,7 @@ def summarize_records(records_text, max_individual=SUMMARIZATION_THRESHOLD):
 
 ### Data Loading and Caching
 
-#### `_get_csv_hash()` — Lines 92-96
+#### `_get_csv_hash()` -Lines 92-96
 
 ```python
 def _get_csv_hash():
@@ -384,7 +391,7 @@ def _get_csv_hash():
 csv_hash = _get_csv_hash()
 ```
 
-#### `load_data(csv_hash)` — Lines 102-125
+#### `load_data(csv_hash)` -Lines 102-125
 
 ```python
 @st.cache_data
@@ -404,7 +411,7 @@ def load_data(csv_hash):
     return data, sentences
 ```
 
-**Decorator**: `@st.cache_data` — Streamlit serializes the return value and caches it. Subsequent calls with the same `csv_hash` return the cached copy instantly. Cache persists across user sessions until the server restarts or the CSV changes.
+**Decorator**: `@st.cache_data` -Streamlit serializes the return value and caches it. Subsequent calls with the same `csv_hash` return the cached copy instantly. Cache persists across user sessions until the server restarts or the CSV changes.
 
 **Steps**:
 1. **Load CSV**: `pd.read_csv()` parses the file into a DataFrame.
@@ -413,7 +420,7 @@ def load_data(csv_hash):
 4. **Pre-compute lowercase columns**: Creates `_risk_level_lower`, `_primary_control_type_lower`, `_risk_title_lower`, `_risk_description_lower`. These are used by `lookup_records()` for case-insensitive matching without calling `.lower()` on every comparison. Prefix `_` indicates internal/helper columns.
 5. **Build sentences**: Converts each row to a text string via `row_to_text()`. These sentences are the embedding input and the LLM context.
 
-#### `load_model_and_embeddings(csv_hash)` — Lines 131-136
+#### `load_model_and_embeddings(csv_hash)` -Lines 131-136
 
 ```python
 @st.cache_resource
@@ -423,7 +430,7 @@ def load_model_and_embeddings(csv_hash):
     return model, embeddings
 ```
 
-**Decorator**: `@st.cache_resource` — Used instead of `@st.cache_data` because the model object is not serializable. `cache_resource` stores a reference to the object in memory, shared across all sessions.
+**Decorator**: `@st.cache_resource` -Used instead of `@st.cache_data` because the model object is not serializable. `cache_resource` stores a reference to the object in memory, shared across all sessions.
 
 **Steps**:
 1. **Load model**: Downloads from HuggingFace Hub on first run (~110MB), cached locally at `~/.cache/huggingface/`. The BGE-base model uses a 12-layer BERT architecture producing 768-dim vectors.
@@ -431,7 +438,7 @@ def load_model_and_embeddings(csv_hash):
 
 **Performance**: Encoding 1,650 records takes ~5-10 seconds on CPU. This only runs once per CSV hash.
 
-#### `build_summary(csv_hash)` — Lines 142-173
+#### `build_summary(csv_hash)` -Lines 142-173
 
 ```python
 @st.cache_data
@@ -444,7 +451,7 @@ Pre-computes aggregate statistics (total risks, counts per risk level, per contr
 
 ### Groq Client
 
-#### `_init_groq_client()` — Lines 180-190
+#### `_init_groq_client()` -Lines 180-190
 
 ```python
 def _init_groq_client():
@@ -457,11 +464,11 @@ def _init_groq_client():
 client = _init_groq_client()
 ```
 
-Initializes the Groq SDK client at module load time. `st.stop()` halts the Streamlit app if the key is missing — no point continuing without LLM access.
+Initializes the Groq SDK client at module load time. `st.stop()` halts the Streamlit app if the key is missing -no point continuing without LLM access.
 
 ### Core Retrieval Logic
 
-#### `is_aggregate_question(question)` — Lines 197-213
+#### `is_aggregate_question(question)` -Lines 197-213
 
 ```python
 def is_aggregate_question(question):
@@ -482,9 +489,9 @@ def is_aggregate_question(question):
     return any(kw in q_lower for kw in AGGREGATE_KEYWORDS)
 ```
 
-**Algorithm — Two-Pass Aggregate Detection**:
+**Algorithm -Two-Pass Aggregate Detection**:
 
-**Pass 1 (Specificity Check)**: Before checking aggregate keywords, scan all unique risk titles. If the user's question mentions a specific title (2+ significant-word matches for multi-word titles, or 1 match for single-word titles), return `False` immediately — this is a specific query even if it contains aggregate-sounding words.
+**Pass 1 (Specificity Check)**: Before checking aggregate keywords, scan all unique risk titles. If the user's question mentions a specific title (2+ significant-word matches for multi-word titles, or 1 match for single-word titles), return `False` immediately -this is a specific query even if it contains aggregate-sounding words.
 
 *Why this matters*: "What are **all controls** for Chemical **Spill** Response **Delay**?" contains the aggregate keyword "all controls" but the user wants specific details about a named risk. Without Pass 1, this would be misclassified as aggregate.
 
@@ -492,7 +499,7 @@ def is_aggregate_question(question):
 
 **Word filtering**: `len(w) > 3` strips short words ("the", "for", "is", "and") that would cause false positive title matches.
 
-#### `lookup_records(question)` — Lines 216-258
+#### `lookup_records(question)` -Lines 216-258
 
 ```python
 def lookup_records(question):
@@ -503,7 +510,7 @@ def lookup_records(question):
 
 **Purpose**: Keyword-based record search. Complements embedding search by finding exact categorical matches that semantic search might miss.
 
-**Step 1 — Risk Level Matching (lines 224-226)**:
+**Step 1 -Risk Level Matching (lines 224-226)**:
 ```python
 for level in df['_risk_level_lower'].dropna().unique():
     if level in q_lower:
@@ -511,7 +518,7 @@ for level in df['_risk_level_lower'].dropna().unique():
 ```
 If the question contains "high", "medium", "low", or "critical", returns ALL records with that risk level. Uses exact substring matching against the pre-computed lowercase column.
 
-**Step 2 — Control Type Matching (lines 228-230)**:
+**Step 2 -Control Type Matching (lines 228-230)**:
 ```python
 for ctrl in df['_primary_control_type_lower'].dropna().unique():
     if ctrl in q_lower:
@@ -519,7 +526,7 @@ for ctrl in df['_primary_control_type_lower'].dropna().unique():
 ```
 Same pattern for "preventive", "detective", "corrective".
 
-**Step 3 — Risk Title Matching (lines 232-250)**:
+**Step 3 -Risk Title Matching (lines 232-250)**:
 
 This is the most complex matching logic with three tiers:
 
@@ -533,21 +540,21 @@ _common_title_words = {
 
 The `_common_title_words` set contains generic words that appear in many risk titles. These are excluded from single-word matching to prevent false positives (e.g., "risk" matching every title with "risk" in it).
 
-**Tier 1 — Strong match (2+ words, multi-word title)**:
+**Tier 1 -Strong match (2+ words, multi-word title)**:
 ```python
 if len(title_words) >= 2 and matching_count >= 2:
     matched_indices.update(...)
 ```
 For titles like "Chemical Spill Response Delay" (4 significant words), at least 2 must stem-match query words. This is the primary matching strategy.
 
-**Tier 2 — Single-word title**:
+**Tier 2 -Single-word title**:
 ```python
 elif len(title_words) == 1 and matching_count == 1:
     matched_indices.update(...)
 ```
 Titles with only one significant word (rare) need just 1 match.
 
-**Tier 3 — Distinctive single-word match (relaxed matching)**:
+**Tier 3 -Distinctive single-word match (relaxed matching)**:
 ```python
 elif len(title_words) >= 2 and matching_count == 1:
     matched_tw = [tw for tw in title_words
@@ -559,7 +566,7 @@ If only 1 word in a multi-word title matches, allow the match ONLY if the matche
 - "total **spil** control" → matches "Chemical **Spill** Response Delay" because "spill" is distinctive.
 - But "total **control** risk" would NOT match every title containing "control" because "control" is in the common words set.
 
-**Step 4 — Description Fallback (lines 252-256)**:
+**Step 4 -Description Fallback (lines 252-256)**:
 ```python
 if not matched_indices:
     for idx, row in df.iterrows():
@@ -570,9 +577,9 @@ if not matched_indices:
 ```
 Only used when no title, level, or control type matched. Scans risk descriptions for 2+ word overlap. This is a O(n * m) operation (n=rows, m=words per description) so it's the last resort.
 
-**Return**: `df.loc[list(matched_indices)]` — a DataFrame subset of matched rows.
+**Return**: `df.loc[list(matched_indices)]` -a DataFrame subset of matched rows.
 
-#### `_score_record(record_text, q_embedding)` — Lines 294-297
+#### `_score_record(record_text, q_embedding)` -Lines 294-297
 
 ```python
 def _score_record(record_text, q_embedding):
@@ -584,7 +591,7 @@ def _score_record(record_text, q_embedding):
 
 **Cost**: Encoding a single record takes ~3-5ms on CPU. This is called once per keyword-only match (typically 0-5 records).
 
-#### `_run_retrieval(query)` — Lines 300-330
+#### `_run_retrieval(query)` -Lines 300-330
 
 ```python
 def _run_retrieval(query):
@@ -621,7 +628,7 @@ def _run_retrieval(query):
     return lookup_texts, embedding_records, top_score, query, sources, scores_map
 ```
 
-**Algorithm — Dual Retrieval with Score Unification**:
+**Algorithm -Dual Retrieval with Score Unification**:
 
 1. **Keyword lookup**: Calls `lookup_records()` to get exact matches. Converts matched rows to text.
 2. **Semantic search**: Encodes the query into a 768-dim vector, computes cosine similarity against ALL 1,650 pre-encoded record vectors in a single batched operation (`util.cos_sim`), then selects the top-K (10) highest scores using PyTorch's `topk()`.
@@ -631,7 +638,7 @@ def _run_retrieval(query):
 
 **Return**: Tuple of `(lookup_texts, embedding_records, top_score, query, sources, scores_map)`.
 
-#### `retrieve_context(question)` — Lines 333-361
+#### `retrieve_context(question)` -Lines 333-361
 
 ```python
 def retrieve_context(question):
@@ -678,7 +685,7 @@ Labels the first record as "BEST MATCH" with its cosine score. All other records
 
 ### LLM Generation
 
-#### `ask_llm_stream(question, context, chat_history, feedback_context)` — Lines 261-291
+#### `ask_llm_stream(question, context, chat_history, feedback_context)` -Lines 261-291
 
 ```python
 def ask_llm_stream(question, context, chat_history=None, feedback_context=""):
@@ -722,7 +729,7 @@ def ask_llm_stream(question, context, chat_history=None, feedback_context=""):
 
 ### Feedback System
 
-#### `save_feedback(question, response_summary, rating, comment)` — Lines 368-381
+#### `save_feedback(question, response_summary, rating, comment)` -Lines 368-381
 
 ```python
 def save_feedback(question, response_summary, rating, comment=""):
@@ -755,7 +762,7 @@ def save_feedback(question, response_summary, rating, comment=""):
 
 **Auto-creation**: If `feedback.csv` doesn't exist, writes the header row first.
 
-#### `load_recent_feedback()` — Lines 384-410
+#### `load_recent_feedback()` -Lines 384-410
 
 ```python
 def load_recent_feedback():
@@ -777,9 +784,9 @@ def load_recent_feedback():
         rating = row.get("rating", "")
         rating_label = "👍" if rating == "up" else "👎" if rating == "down" else str(rating)
         comment = str(row.get("comment", "")).strip()
-        entry = f"- Q: \"{row['question']}\" — Rated: {rating_label}"
+        entry = f"- Q: \"{row['question']}\" -Rated: {rating_label}"
         if comment and comment != "nan":
-            entry += f" — Comment: \"{comment}\""
+            entry += f" -Comment: \"{comment}\""
         lines.append(entry)
 
     return "\n".join(lines)
@@ -800,7 +807,7 @@ def load_recent_feedback():
 
 ## Module: app.py
 
-The Streamlit UI layer — ~179 lines handling page config, sidebar, chat rendering, feedback UI, and the main retrieval + generation loop.
+The Streamlit UI layer -~179 lines handling page config, sidebar, chat rendering, feedback UI, and the main retrieval + generation loop.
 
 ### Page Configuration and Imports
 
@@ -811,6 +818,7 @@ import streamlit as st
 from config import (
     EXAMPLE_QUESTIONS, CHAT_FONT_SIZE_PX,
     APP_TITLE, APP_ICON, APP_DESCRIPTION,
+    CLEAR_CHAT_PHRASES,
 )
 
 st.set_page_config(
@@ -885,18 +893,18 @@ with st.sidebar:
 def _render_feedback(msg_index, message):
     feedback_key = f"feedback_{msg_index}"
 
-    # Already submitted — show confirmation
+    # Already submitted -show confirmation
     if feedback_key in st.session_state:
         saved = st.session_state[feedback_key]
         icon = "👍" if saved == "up" else "👎"
         comment = st.session_state.get(f"saved_comment_{msg_index}", "")
         label = f"Feedback recorded: {icon}"
         if comment:
-            label += f' — "{comment}"'
+            label += f' -"{comment}"'
         st.caption(label)
         return
 
-    # Not yet submitted — show all three elements at once
+    # Not yet submitted -show all three elements at once
     col1, col2, col3 = st.columns([1, 1, 6])
     with col1:
         thumb_up = st.button("👍", key=f"up_{msg_index}")
@@ -984,7 +992,16 @@ for i, message in enumerate(st.session_state.messages):
 
 On every rerun, all past messages are re-rendered from `st.session_state.messages`. Each assistant message shows: content → relevance badge → source citations → feedback buttons. The `msg_index` (`i`) ensures unique Streamlit widget keys.
 
-**New question handling (lines 143-178)**:
+**Inline clear chat commands (lines 143-145)**:
+```python
+if user_question and user_question.strip().lower() in CLEAR_CHAT_PHRASES:
+    st.session_state.messages = []
+    st.rerun()
+```
+
+Before processing a question through the RAG pipeline, the app checks if the input matches any phrase in `CLEAR_CHAT_PHRASES` (case-insensitive). If so, it clears the chat history and reruns without sending anything to the LLM. This lets users type "clear", "reset", "new chat", etc. directly in the chat input as an alternative to the sidebar button.
+
+**New question handling (lines 147-182)**:
 ```python
 user_question = st.chat_input("Ask a question about a risk or control...")
 
@@ -1034,22 +1051,23 @@ if user_question:
 
 **Execution flow**:
 1. `st.chat_input()` returns the user's typed question (or `None`).
-2. Sidebar example buttons set `pending_question`, which overrides the chat input.
-3. User message is appended to session state.
-4. `retrieve_context()` runs the full RAG pipeline (keyword + embedding search, context building).
-5. Relevance badge is shown immediately (before LLM response).
-6. Chat history is extracted from session state for conversational context.
-7. `load_recent_feedback()` fetches the last 10 feedback entries.
-8. `st.write_stream()` renders the LLM response token-by-token as it streams from Groq.
-9. Source citations are rendered in a collapsible panel.
-10. The assistant message is persisted to session state with `question`, `sources`, and `score` metadata.
-11. `st.rerun()` forces a re-render so the new message appears in the history loop with feedback buttons.
+2. If the input matches a clear chat phrase, the conversation is reset immediately (no RAG pipeline).
+3. Sidebar example buttons set `pending_question`, which overrides the chat input.
+4. User message is appended to session state.
+5. `retrieve_context()` runs the full RAG pipeline (keyword + embedding search, context building).
+6. Relevance badge is shown immediately (before LLM response).
+7. Chat history is extracted from session state for conversational context.
+8. `load_recent_feedback()` fetches the last 10 feedback entries.
+9. `st.write_stream()` renders the LLM response token-by-token as it streams from Groq.
+10. Source citations are rendered in a collapsible panel.
+11. The assistant message is persisted to session state with `question`, `sources`, and `score` metadata.
+12. `st.rerun()` forces a re-render so the new message appears in the history loop with feedback buttons.
 
 **Why `st.rerun()`?**: Without it, the newly streamed response wouldn't have feedback buttons (they're only rendered in the history loop). The rerun re-renders everything from session state, including the feedback UI for the new message.
 
 ---
 
-## Feedback Loop — Full Lifecycle
+## Feedback Loop -Full Lifecycle
 
 This section provides a detailed walkthrough of how user feedback flows through the system, from collection to storage to injection into the LLM prompt.
 
@@ -1061,7 +1079,7 @@ Every assistant message in the chat history displays three feedback elements sim
 2. **👎 Thumbs Down Button**: Indicates a negative rating.
 3. **Optional Comment Text Input**: A free-text field where users can type specific feedback (e.g., "Missing secondary controls", "Wrong risk matched", "Great answer").
 
-The UI is implemented in `_render_feedback()` in `app.py` (lines 60-97). All three elements are visible at the same time — the user does NOT need to click a thumb first to see the comment box.
+The UI is implemented in `_render_feedback()` in `app.py` (lines 60-97). All three elements are visible at the same time -the user does NOT need to click a thumb first to see the comment box.
 
 **Submission**: The user optionally types a comment, then clicks either 👍 or 👎 to submit. The thumb click triggers submission of both the rating AND whatever comment text is in the input field at that moment.
 
@@ -1102,15 +1120,15 @@ On every new user question, `load_recent_feedback()` in `rag.py` (lines 384-410)
 3. Takes the last `FEEDBACK_LOOKBACK` (10) rows using `fb_df.tail(10)`.
 4. Formats each row into a human-readable line:
    ```
-   - Q: "What controls for fraud?" — Rated: 👎 — Comment: "Missing secondary controls"
-   - Q: "How many high risks?" — Rated: 👍
+   - Q: "What controls for fraud?" -Rated: 👎 -Comment: "Missing secondary controls"
+   - Q: "How many high risks?" -Rated: 👍
    ```
 5. Prepends a header: `USER FEEDBACK ON PAST ANSWERS (use this to improve your response):`
 6. Returns the full text block as a single string.
 
-**Both positive and negative ratings are included**. The LLM sees the full picture — what users liked and disliked — allowing it to reinforce good patterns and avoid bad ones.
+**Both positive and negative ratings are included**. The LLM sees the full picture -what users liked and disliked -allowing it to reinforce good patterns and avoid bad ones.
 
-**Comments are included when present**. Empty comments are omitted (no ` — Comment: ""` suffix).
+**Comments are included when present**. Empty comments are omitted (no ` -Comment: ""` suffix).
 
 ### How Feedback Is Injected Into the LLM
 
@@ -1133,8 +1151,8 @@ The final message sent to the LLM looks like:
 [Chat History (last 6 messages)]
 [User Message]:
   USER FEEDBACK ON PAST ANSWERS (use this to improve your response):
-  - Q: "What controls for fraud?" — Rated: 👎 — Comment: "Missing secondary controls"
-  - Q: "How many high risks?" — Rated: 👍
+  - Q: "What controls for fraud?" -Rated: 👎 -Comment: "Missing secondary controls"
+  - Q: "How many high risks?" -Rated: 👍
 
   BEST MATCH (Cosine Score: 0.72):
   Risk: Fraud Detection Failure. Description: ...
@@ -1147,7 +1165,7 @@ The final message sent to the LLM looks like:
 
 ### How Feedback Influences Future Answers
 
-The feedback text is part of the LLM's input context, positioned BEFORE the retrieved records and question. This positioning is intentional — the LLM reads feedback first, priming its response generation. The effects are:
+The feedback text is part of the LLM's input context, positioned BEFORE the retrieved records and question. This positioning is intentional -the LLM reads feedback first, priming its response generation. The effects are:
 
 1. **Negative ratings with comments**: If a user rated a fraud-related answer 👎 with "Missing secondary controls", the LLM will prioritize including secondary control details in future fraud-related answers.
 
@@ -1159,7 +1177,7 @@ The feedback text is part of the LLM's input context, positioned BEFORE the retr
 
 5. **Recency bias**: Only the last 10 entries are included, so the LLM's behavior reflects recent user satisfaction rather than historical patterns. Older feedback naturally ages out.
 
-**Important**: The feedback does NOT modify the retrieval pipeline. It only affects the LLM's generation. The same records are retrieved regardless of feedback — but the LLM may present them differently (more detail, better formatting, different emphasis) based on past feedback.
+**Important**: The feedback does NOT modify the retrieval pipeline. It only affects the LLM's generation. The same records are retrieved regardless of feedback -but the LLM may present them differently (more detail, better formatting, different emphasis) based on past feedback.
 
 ### Feedback Data Flow Diagram
 
@@ -1215,7 +1233,7 @@ Where `A` and `B` are 768-dimensional vectors. The result ranges from -1 (opposi
 
 **Implementation**: `util.cos_sim(q_embedding, row_embeddings)` computes similarity between the query vector and ALL 1,650 record vectors in a single batched matrix multiplication. This is an O(n × d) operation where n=1650 and d=768, taking ~1-2ms on CPU thanks to PyTorch's optimized BLAS backend.
 
-**Top-K selection**: `all_scores.topk(k=10)` uses PyTorch's partial sort (based on `torch.kthvalue`), which is O(n + k log k) — more efficient than sorting all 1,650 scores.
+**Top-K selection**: `all_scores.topk(k=10)` uses PyTorch's partial sort (based on `torch.kthvalue`), which is O(n + k log k) -more efficient than sorting all 1,650 scores.
 
 ### Sentence Embeddings (BAAI/bge-base-en-v1.5)
 
@@ -1253,7 +1271,7 @@ See the detailed explanation in the `_stem_match()` and `_damerau_levenshtein()`
 
 **Problem**: "total spil control" has only 1 stem-matching word ("spil" → "spill") in the 4-word title "Chemical Spill Response Delay". The standard 2-word minimum would miss this.
 
-**Solution**: Allow 1-word matches if the matched word is "distinctive" — i.e., not in the `_common_title_words` set. Words like "risk", "control", "management" appear in dozens of titles and would cause false positives. But "spill", "fraud", "chemical", "hazardous" are distinctive enough to identify a specific risk.
+**Solution**: Allow 1-word matches if the matched word is "distinctive" -i.e., not in the `_common_title_words` set. Words like "risk", "control", "management" appear in dozens of titles and would cause false positives. But "spill", "fraud", "chemical", "hazardous" are distinctive enough to identify a specific risk.
 
 ### Record Summarization
 
@@ -1279,7 +1297,7 @@ See the detailed explanation in the `_stem_match()` and `_damerau_levenshtein()`
 
 ---
 
-## Data Flow — End to End
+## Data Flow -End to End
 
 ```
 1. User types question in st.chat_input() or clicks sidebar example
