@@ -4,13 +4,13 @@ import streamlit as st
 # that trigger @st.cache_data or @st.cache_resource (e.g. rag.py).
 from config import (
     EXAMPLE_QUESTIONS, CHAT_FONT_SIZE_PX,
-    APP_TITLE, APP_ICON, APP_DESCRIPTION,
+    APP_TITLE, APP_DESCRIPTION,
     CLEAR_CHAT_PHRASES,
 )
 
 st.set_page_config(
     page_title=APP_TITLE,
-    page_icon=f":{APP_ICON}:",
+    page_icon="epa_logo.png",
     layout="wide",
 )
 
@@ -23,15 +23,9 @@ from rag import (  # noqa: E402
 # STYLING
 # =============================================================================
 
-_COLOR_HEX = {"green": "#4caf50", "orange": "#ff9800", "red": "#f44336"}
-
 def _relevance_badge(label, color, score):
-    """Returns markdown with the label colored and score subtly tinted."""
-    hex_val = _COLOR_HEX.get(color, "#888")
-    return (
-        f"**Relevance:** :{color}[{label}] "
-        f'<span style="color:{hex_val};opacity:0.7">({score:.2f})</span>'
-    )
+    """Returns markdown with the label colored and plain score."""
+    return f"**Relevance:** :{color}[{label}] ({score:.2f})"
 
 st.markdown(f"""
 <style>
@@ -50,7 +44,8 @@ st.markdown(f"""
 # =============================================================================
 
 with st.sidebar:
-    st.header(f":{APP_ICON}: {APP_TITLE}")
+    st.image("epa_logo.png", width=80)
+    st.header(APP_TITLE)
     st.markdown(APP_DESCRIPTION)
     st.divider()
     st.subheader("Example Questions")
@@ -58,6 +53,13 @@ with st.sidebar:
         if st.button(example, key=f"sidebar_{example}", use_container_width=True):
             st.session_state.pending_question = example
             st.rerun()
+    st.divider()
+    st.markdown(
+        "📄 [View Full Risk & Control Registry]"
+        "(https://github.com/bkhanal4351/risk-assessment-bot/blob/main/"
+        "Epa%20risk%20and%20control%20registry.csv)",
+        help="Opens the complete EPA Risk and Control Registry on GitHub.",
+    )
     st.divider()
     st.caption("Powered by Llama 3.3 70B via Groq")
     if st.button("Clear Chat", use_container_width=True):
@@ -123,7 +125,16 @@ def _render_sources(msg_index, message):
 # MAIN CHAT AREA
 # =============================================================================
 
-st.title(APP_TITLE)
+import base64, pathlib
+
+_logo_b64 = base64.b64encode(pathlib.Path("epa_logo.png").read_bytes()).decode()
+st.markdown(
+    f'<div style="display:flex;align-items:center;gap:14px;margin-bottom:4px">'
+    f'<img src="data:image/png;base64,{_logo_b64}" width="52" style="flex-shrink:0">'
+    f'<h1 style="margin:0;padding:0">{APP_TITLE}</h1>'
+    f'</div>',
+    unsafe_allow_html=True,
+)
 st.caption("Ask questions about risks, controls, and mitigations from the EPA Risk and Control Registry.")
 
 if "messages" not in st.session_state:
@@ -140,8 +151,7 @@ for i, message in enumerate(st.session_state.messages):
             # Show relevance badge
             if "score" in message:
                 label, color = confidence_label(message["score"])
-                st.markdown(_relevance_badge(label, color, message["score"]),
-                            unsafe_allow_html=True)
+                st.markdown(_relevance_badge(label, color, message["score"]))
             _render_sources(i, message)
             _render_feedback(i, message)
 
@@ -165,7 +175,7 @@ if user_question:
         context, score, is_agg, sources = retrieve_context(user_question)
 
         label, color = confidence_label(score)
-        st.markdown(_relevance_badge(label, color, score), unsafe_allow_html=True)
+        st.markdown(_relevance_badge(label, color, score))
 
         chat_history = [
             {"role": m["role"], "content": m["content"]}

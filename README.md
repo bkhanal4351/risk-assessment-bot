@@ -536,6 +536,345 @@ The current architecture is designed for small-to-medium usage (single Streamlit
 | LLM API throughput | ~100-500 requests/min depending on user activity patterns |
 | Redis cache | 1-2 GB for query caching and session storage |
 
+### Production Path: Scaling the LLM and UI
+
+#### The Core Idea: It Is Just an API Call
+
+Our entire LLM integration is a single API call in `rag.py`. Right now that call goes to Groq, but swapping to any other provider is a minimal code change. The RAG pipeline (retrieval, context building, prompt formatting) stays exactly the same. Only the function that sends the prompt and receives tokens changes.
+
+For example, switching from Groq to OpenAI, Anthropic, or any OpenAI-compatible endpoint:
+
+```python
+# Current (Groq)
+from groq import Groq
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+response = client.chat.completions.create(
+    model="llama-3.3-70b-versatile",
+    messages=messages,
+    stream=True,
+)
+
+# OpenAI (same SDK interface, different base URL and key)
+from openai import OpenAI
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+response = client.chat.completions.create(
+    model="gpt-4o",
+    messages=messages,
+    stream=True,
+)
+
+# Anthropic
+import anthropic
+client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+response = client.messages.stream(
+    model="claude-sonnet-4-20250514",
+    messages=messages,
+    max_tokens=1500,
+)
+
+# AWS Bedrock (uses boto3, no third-party SDK needed)
+import boto3, json
+bedrock = boto3.client("bedrock-runtime")
+response = bedrock.invoke_model_with_response_stream(
+    modelId="anthropic.claude-3-sonnet-20240229-v1:0",
+    body=json.dumps({"messages": messages, "max_tokens": 1500}),
+)
+
+# Any OpenAI-compatible provider (Ollama, LM Studio, vLLM, Together AI)
+from openai import OpenAI
+client = OpenAI(
+    base_url="http://localhost:11434/v1",   # Ollama example
+    api_key="not-needed",
+)
+response = client.chat.completions.create(
+    model="llama3.3:70b",
+    messages=messages,
+    stream=True,
+)
+```
+
+The point is: our app is not locked into Groq or any specific model. Changing the LLM provider is a 5-line code change in `rag.py` and a new environment variable for the API key. Everything else (retrieval, prompt, UI, feedback) stays untouched.
+
+Similarly, for the UI: Streamlit is great for prototyping and small-team use (we already cover VDI deployment in the setup section above). But if we need to serve 10,000+ users with custom branding, authentication, and persistent chat, we swap the frontend to React or use an AWS-managed chat interface. The backend API stays the same.
+
+#### Why AWS Bedrock (for Agency-Scale Deployment)
+
+AWS Bedrock is a fully managed service that gives us access to foundation models (Claude, Llama, Titan, etc.) without provisioning GPU instances. Key advantages for our use case:
+
+- **No rate limit concerns**: Bedrock scales automatically with provisioned throughput. We purchase model units based on expected traffic instead of hitting per-minute API caps.
+- **Data stays in our AWS account**: Unlike third-party APIs (Groq, OpenAI), data sent to Bedrock never leaves our VPC. This matters for EPA risk data that may have sensitivity restrictions.
+- **IAM integration**: Access control ties directly into existing AWS IAM roles and policies. We can restrict who can call the model, audit every request via CloudTrail, and enforce encryption at rest and in transit.
+- **Knowledge Bases for Amazon Bedrock**: Bedrock has a built-in RAG feature called Knowledge Bases. We can upload our CSV (or convert it to a supported format), and Bedrock handles chunking, embedding, vector storage (backed by OpenSearch Serverless or Pinecone), and retrieval automatically. This replaces our custom `rag.py` pipeline entirely.
+- **Model flexibility**: Bedrock gives us access to multiple foundation models through a single API. We can swap between them with a config change while keeping the retrieval layer the same.
+
+#### LLM Options on Bedrock
+
+We currently use Llama 3.3 70B via Groq. On Bedrock, we have several model families to choose from depending on cost, speed, and accuracy requirements:
+
+| Model | Provider | Strengths | Best For |
+| --- | --- | --- | --- |
+| Claude 3.5 Sonnet / Claude 4 | Anthropic | Strong reasoning, structured output, low hallucination | Our primary choice for risk/control Q&A where accuracy matters |
+| Llama 3.1 70B / 405B | Meta | Open-weight, good general performance | Drop-in replacement for our current Groq-hosted Llama setup |
+| Amazon Titan Text | Amazon | Native AWS integration, lowest latency within Bedrock | High-throughput aggregate queries where speed matters more than nuance |
+| Mistral Large | Mistral AI | Fast inference, strong multilingual support | If we need to support non-English users in the future |
+| Cohere Command R+ | Cohere | Built-in RAG optimization, grounded generation | Alternative if we want the LLM to handle retrieval-aware generation natively |
+
+We can also set up **model fallback**: if our primary model (e.g., Claude) hits a throughput limit or returns an error, the API layer automatically retries with a secondary model (e.g., Titan). This is a config-level change in our Lambda function, no frontend changes needed.
+
+#### Replacing the Retrieval Pipeline
+
+| Current Component | Bedrock Equivalent |
+| --- | --- |
+| `sentence-transformers` (BAAI/bge-base-en-v1.5) | Bedrock Titan Embeddings or Cohere Embed via Bedrock |
+| In-memory cosine similarity search | OpenSearch Serverless (vector engine) or Pinecone via Knowledge Bases |
+| `rag.py` keyword + embedding hybrid search | Knowledge Bases retrieval with metadata filtering (risk level, control type) |
+| Groq API (`ask_llm_stream`) | Bedrock `InvokeModelWithResponseStream` API |
+| `feedback.csv` | DynamoDB table for feedback, queried at generation time |
+
+With Knowledge Bases, the entire `retrieve_context()` function becomes a single API call:
+
+```python
+bedrock_agent = boto3.client("bedrock-agent-runtime")
+response = bedrock_agent.retrieve_and_generate(
+    input={"text": user_question},
+    retrieveAndGenerateConfiguration={
+        "type": "KNOWLEDGE_BASE",
+        "knowledgeBaseConfiguration": {
+            "knowledgeBaseId": "our-kb-id",
+            "modelArn": "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-sonnet",
+        },
+    },
+)
+```
+
+#### Replacing Streamlit with a Production Frontend
+
+Streamlit works well for prototyping and internal demos (we already cover VDI deployment in the setup section above), but it has limitations at scale:
+
+- **Single-threaded Python process** per user session
+- **No built-in authentication** or role-based access
+- **Session state is ephemeral** (lost on page refresh)
+- **Limited UI customization** compared to a full frontend framework
+
+For 10,000+ users, we have two options: build a custom React frontend deployed on EC2, or use an AWS-managed chat UI that requires no frontend code at all.
+
+#### Option A: Custom React Frontend on EC2
+
+This gives us full control over the UI, branding, and user experience. We build a React app that talks to our Python API layer, and deploy both on EC2.
+
+**Architecture:**
+
+| Layer | Technology | Purpose |
+| --- | --- | --- |
+| Frontend | React / Next.js on EC2 (behind ALB) | Custom chat UI with sidebar, feedback, source citations |
+| Auth | AWS Cognito or agency SSO (SAML/OAuth) | User authentication and access control |
+| API | FastAPI on the same EC2 (or separate instance) | Python backend that handles retrieval and LLM calls |
+| RAG | Bedrock Knowledge Bases | Managed retrieval pipeline with vector search |
+| LLM | Bedrock (Claude, Llama, Titan, or Mistral) | Streaming response generation |
+| Chat Storage | DynamoDB | Persistent chat history across sessions and devices |
+| Feedback | DynamoDB | Feedback ratings and comments, queryable for analytics |
+| Monitoring | CloudWatch + X-Ray | Request tracing, latency dashboards, error alerting |
+
+**Step-by-step EC2 deployment:**
+
+1. **Launch an EC2 instance**: We use an Amazon Linux 2023 or Ubuntu 22.04 AMI. For 10,000+ users, start with a `t3.xlarge` (4 vCPUs, 16 GB RAM) for the API and a `t3.medium` for the frontend. Both go in the same VPC.
+
+2. **Set up the API server on EC2**:
+
+```bash
+# SSH into the API instance
+ssh -i our-key.pem ec2-user@<api-instance-ip>
+
+# Install Python and dependencies
+sudo yum install python3.11 git -y   # Amazon Linux
+sudo apt install python3.11 git -y   # Ubuntu
+
+# Clone the repo and install
+git clone https://github.com/bkhanal4351/risk-assessment-bot.git
+cd risk-assessment-bot
+python3.11 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+pip install fastapi uvicorn boto3
+
+# Configure AWS credentials for Bedrock access
+aws configure   # or attach an IAM role to the EC2 instance (preferred)
+
+# Create a systemd service so the API starts on boot
+sudo tee /etc/systemd/system/risk-api.service << 'EOF'
+[Unit]
+Description=Risk Assessment API
+After=network.target
+
+[Service]
+User=ec2-user
+WorkingDirectory=/home/ec2-user/risk-assessment-bot
+ExecStart=/home/ec2-user/risk-assessment-bot/venv/bin/uvicorn api:app --host 0.0.0.0 --port 8000
+Restart=always
+Environment=AWS_DEFAULT_REGION=us-east-1
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl enable risk-api
+sudo systemctl start risk-api
+```
+
+3. **Build and deploy the React frontend on EC2**:
+
+```bash
+# SSH into the frontend instance (or use the same instance)
+ssh -i our-key.pem ec2-user@<frontend-instance-ip>
+
+# Install Node.js
+curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
+sudo yum install nodejs nginx -y
+
+# Build the React app
+cd risk-assessment-frontend
+npm install
+npm run build   # produces a static build/ folder
+
+# Copy build output to NGINX web root
+sudo cp -r build/* /usr/share/nginx/html/
+
+# Configure NGINX to serve the React app and proxy API calls
+sudo tee /etc/nginx/conf.d/risk-app.conf << 'EOF'
+server {
+    listen 80;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # React client-side routing: serve index.html for all routes
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Proxy API calls to the FastAPI backend
+    location /api/ {
+        proxy_pass http://<api-instance-private-ip>:8000/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 300s;   # long timeout for streaming LLM responses
+    }
+}
+EOF
+
+sudo systemctl enable nginx
+sudo systemctl restart nginx
+```
+
+4. **Put an Application Load Balancer (ALB) in front**:
+   - Create an ALB in the EC2 console, attach it to our VPC's public subnets
+   - Create a target group pointing to the frontend EC2 instance(s) on port 80
+   - Add an HTTPS listener (port 443) with an ACM certificate for our domain
+   - Route `/api/*` to the API target group, everything else to the frontend target group
+   - Enable sticky sessions if we use server-side session state
+
+5. **Auto Scaling for traffic spikes**:
+   - Create an AMI from our configured EC2 instances
+   - Set up an Auto Scaling Group with min 2, desired 3, max 10 instances
+   - Use CPU utilization (target 70%) or request count as the scaling metric
+   - The ALB distributes traffic across healthy instances automatically
+
+6. **DNS and SSL**:
+   - Point our domain (e.g., `risk-bot.epa.gov`) to the ALB using Route 53
+   - ACM provides free SSL certificates that auto-renew
+
+#### Option B: AWS Managed Chat UI (No Frontend Code)
+
+If we want to skip building a custom React app entirely, AWS provides managed chat interfaces that connect directly to Bedrock:
+
+##### Amazon Bedrock Agents + Bedrock Chat Playground
+
+Bedrock's built-in console playground supports multi-turn chat with Knowledge Base integration. For internal agency use, team members can access it directly through the AWS Console with their IAM credentials. This works for smaller teams (50-200 users) but is not ideal for a public-facing or large-scale deployment since it requires AWS Console access.
+
+##### Amazon Q Business (recommended for managed UI)
+
+Amazon Q Business is a fully managed AI assistant service from AWS. We configure it with our data source (S3 bucket containing the risk registry CSV), and Amazon Q provides:
+
+- A **hosted chat web app** with a shareable URL, no frontend code needed
+- **Built-in authentication** via IAM Identity Center (SSO)
+- **Document-grounded answers** with source citations (similar to our current "Sources from Registry" feature)
+- **Admin controls** for managing data sources, access permissions, and response guardrails
+- **Feedback collection** built into the UI (thumbs up/down)
+
+Setup:
+
+1. Upload `Epa risk and control registry.csv` to an S3 bucket
+2. In the Amazon Q Business console, create an application and add the S3 bucket as a data source
+3. Configure IAM Identity Center for user authentication
+4. Amazon Q indexes the data and provides a chat URL we can share with all 10,000+ users
+5. No EC2 instances, no NGINX, no React build process
+
+**Trade-offs between Option A and Option B:**
+
+| | Option A (React + EC2) | Option B (Amazon Q Business) |
+| --- | --- | --- |
+| Custom UI/branding | Full control over look and feel | Limited to Amazon Q's built-in interface |
+| Development effort | 4-8 weeks to build and deploy | 1-2 days to configure |
+| Maintenance | We manage EC2, NGINX, scaling, SSL | Fully managed by AWS |
+| Feedback system | Custom (our DynamoDB-backed approach) | Built-in thumbs up/down |
+| Authentication | Cognito or any SAML/OAuth provider | IAM Identity Center (SSO) |
+| Cost | Higher (EC2 instances + ALB + DevOps time) | Lower (pay per indexed document + per query) |
+| Best for | Public-facing app with EPA branding | Internal agency tool for staff |
+
+#### Deployment Architecture (Option A)
+
+```text
+Users (10,000+)
+      |
+      v
+Route 53 (DNS)
+      |
+      v
+ALB (HTTPS, auto-scaling)
+      |
+      +--> EC2 Frontend (React + NGINX)
+      |
+      +--> EC2 API (FastAPI + Python)
+              |
+              +-------> Bedrock Knowledge Bases (retrieval)
+              |              |
+              |              v
+              |         OpenSearch Serverless (vector store)
+              |
+              +-------> Bedrock LLM (streaming generation)
+              |
+              +-------> DynamoDB (chat history + feedback)
+              |
+              +-------> CloudWatch (logging + monitoring)
+```
+
+#### Migration Steps
+
+1. **Export the CSV to a Bedrock Knowledge Base**: Upload `Epa risk and control registry.csv` to S3, create a Knowledge Base with Titan Embeddings, and let Bedrock handle indexing.
+2. **Replace `rag.py` with a FastAPI service**: The API calls Bedrock's `retrieve_and_generate` endpoint and streams the response back using Server-Sent Events (SSE) or WebSocket.
+3. **Build the React frontend** (Option A) or **configure Amazon Q Business** (Option B): For React, port the chat UI, sidebar, feedback buttons, and source citations from Streamlit to React components. For Amazon Q, add the S3 data source and configure IAM Identity Center.
+4. **Deploy to EC2** (Option A): Follow the step-by-step guide above to set up NGINX, the API service, ALB, and Auto Scaling.
+5. **Set up authentication**: Cognito user pool for Option A, or IAM Identity Center for Option B.
+6. **Migrate feedback to DynamoDB**: Create a table with `message_id` as partition key, storing question, rating, comment, and timestamp. Query recent feedback at generation time.
+7. **Deploy infrastructure as code**: Define the full stack using CDK or Terraform for repeatable deployments across environments (dev, staging, prod).
+
+#### Cost Estimate (10,000 monthly active users)
+
+| Service | Estimated Monthly Cost |
+| --- | --- |
+| Bedrock LLM (Claude Sonnet, ~500K requests) | $500 - $1,500 |
+| Bedrock Knowledge Bases + OpenSearch Serverless | $200 - $500 |
+| Lambda (API compute) | $50 - $150 |
+| DynamoDB (chat + feedback storage) | $25 - $50 |
+| S3 + CloudFront (frontend hosting) | $10 - $30 |
+| Cognito (authentication) | Free tier covers 50K MAUs |
+| **Total** | **~$800 - $2,200/month** |
+
+Costs scale roughly linearly with usage. Bedrock's per-token pricing means we only pay for actual LLM calls, not idle GPU time.
+
 ### Quick Wins (No Architecture Change)
 
 If we need to handle moderate growth (hundreds of users) before a full rewrite:

@@ -91,8 +91,11 @@ Each assistant response has thumbs-up and thumbs-down buttons.
 
 ## 6. Clear Chat Commands
 
-Instead of reaching for the sidebar button, we can type clear commands
-directly in the chat input.
+We support two ways to reset the conversation:
+
+**Option 1: Sidebar button** - Click the "Clear Chat" button at the bottom of the sidebar.
+
+**Option 2: Inline commands** - Type any of the following directly in the chat input. The app intercepts these before they reach the RAG pipeline and resets `st.session_state.messages` immediately.
 
 | Type any of these…         | Result                            |
 |---------------------------|-----------------------------------|
@@ -102,6 +105,8 @@ directly in the chat input.
 | `reset`                   | Same                              |
 | `new chat`                | Same                              |
 | `start over`              | Same                              |
+
+**How it works:** In `app.py`, before the user's input is sent to `retrieve_context()`, we check if it matches any phrase in `CLEAR_CHAT_PHRASES` (defined in `config.py`). If it matches, we clear the session state and call `st.rerun()` to refresh the page. The phrase list is case-insensitive and uses exact matching, so normal questions containing the word "clear" (e.g., "what are the clear risks?") are not affected.
 
 ---
 
@@ -128,9 +133,11 @@ instead of listing every row individually.
 
 ## 9. Sidebar Navigation
 
-- **Example question buttons** -click to auto-fill and run
-- **Clear Chat button** -one-click reset
-- **App description** -always visible context for new users
+- **EPA logo** - displayed at the top for branding, also used as the browser tab favicon
+- **App description** - always visible context for new users
+- **Example question buttons** - click to auto-fill and run a sample query
+- **View Full Risk & Control Registry** - link to the source CSV on GitHub so users can browse the raw data
+- **Clear Chat button** - one-click reset that clears `st.session_state.messages` and reruns the app
 
 ---
 
