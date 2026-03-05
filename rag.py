@@ -90,10 +90,12 @@ def _stem_match(word1, word2, min_chars=4, ratio=0.75):
     return _damerau_levenshtein(word1, word2) <= max_dist
 
 
-def summarize_records(records_text, max_individual=SUMMARIZATION_THRESHOLD):
+def summarize_records(records_text, max_individual=SUMMARIZATION_THRESHOLD,
+                      force_summary=False):
     """Groups large record sets by risk title instead of listing every record.
-    Prevents token overflow when sending context to the LLM."""
-    if len(records_text) <= max_individual:
+    Prevents token overflow when sending context to the LLM.
+    When force_summary=True, always includes title counts even for small sets."""
+    if len(records_text) <= max_individual and not force_summary:
         return "\n".join(records_text)
 
     title_counts = {}
@@ -107,8 +109,9 @@ def summarize_records(records_text, max_individual=SUMMARIZATION_THRESHOLD):
     for title, count in sorted(title_counts.items(), key=lambda x: -x[1]):
         summary_lines.append(f"  {title}: {count} records")
 
-    summary_lines.append(f"\nSample records (showing {max_individual} of {len(records_text)}):")
-    for record in records_text[:max_individual]:
+    show_count = min(max_individual, len(records_text))
+    summary_lines.append(f"\nSample records (showing {show_count} of {len(records_text)}):")
+    for record in records_text[:show_count]:
         summary_lines.append(record)
 
     return "\n".join(summary_lines)
@@ -372,8 +375,13 @@ def retrieve_context(question):
         all_records = all_records[:MAX_RECORDS]
 
     if is_agg:
-        context_records = summarize_records(all_records)
-        context = f"Dataset Summary:\n{data_summary}\n\nMatching Records ({record_count} found):\n{context_records}"
+        context_records = summarize_records(all_records, force_summary=True)
+        context = (
+            f"THIS IS AN AGGREGATE QUESTION. Present counts, totals, and "
+            f"breakdowns — do NOT use the Best Match / Other Controls format.\n\n"
+            f"Dataset Summary:\n{data_summary}\n\n"
+            f"Matching Records ({record_count} found):\n{context_records}"
+        )
     else:
         best_match = all_records[0] if all_records else ""
         best_score = scores_map.get(best_match, 0)
