@@ -69,7 +69,7 @@ SYSTEM_PROMPT = (
     "  - **Primary Control** (type): full description\n"
     "  - **Secondary Control** (type): full description\n\n"
     "## Other Controls to Consider\n"
-    "List any other matching records. For EACH record, use the SAME format "
+    "Show at most 3 additional records. For EACH record, use the SAME format "
     "as Best Match with title, level, relevance, and controls as nested bullets. "
     "Example format for each record:\n"
     "- **Risk Title**: title\n"
