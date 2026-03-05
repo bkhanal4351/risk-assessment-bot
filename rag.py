@@ -45,20 +45,49 @@ def confidence_label(score):
         return "Low", "red"
 
 
+def _damerau_levenshtein(s1, s2):
+    """Computes Damerau-Levenshtein distance (counts transpositions as 1 edit)."""
+    len1, len2 = len(s1), len(s2)
+    d = [[0] * (len2 + 1) for _ in range(len1 + 1)]
+    for i in range(len1 + 1):
+        d[i][0] = i
+    for j in range(len2 + 1):
+        d[0][j] = j
+    for i in range(1, len1 + 1):
+        for j in range(1, len2 + 1):
+            cost = 0 if s1[i - 1] == s2[j - 1] else 1
+            d[i][j] = min(
+                d[i - 1][j] + 1,
+                d[i][j - 1] + 1,
+                d[i - 1][j - 1] + cost,
+            )
+            if i > 1 and j > 1 and s1[i - 1] == s2[j - 2] and s1[i - 2] == s2[j - 1]:
+                d[i][j] = min(d[i][j], d[i - 2][j - 2] + 1)
+    return d[len1][len2]
+
+
 def _stem_match(word1, word2, min_chars=4, ratio=0.75):
-    """Check if two words share a common prefix that covers at least `ratio`
-    of the shorter word. Handles inflected forms like 'spill' <-> 'spilling',
-    'leak' <-> 'leakage', 'prevent' <-> 'preventive' without hardcoded rules.
-    Requires the shared prefix to be at least min_chars long."""
+    """Check if two words match via prefix overlap or edit distance.
+    First tries prefix matching for inflected forms (spill <-> spilling).
+    Falls back to Damerau-Levenshtein distance for transposition typos
+    (farud <-> fraud). Requires words to be at least min_chars long."""
     shorter_len = min(len(word1), len(word2))
     if shorter_len < min_chars:
         return word1 == word2
+    # Prefix match for inflected forms
     shared = 0
     for c1, c2 in zip(word1, word2):
         if c1 != c2:
             break
         shared += 1
-    return shared >= max(min_chars, shorter_len * ratio)
+    if shared >= max(min_chars, shorter_len * ratio):
+        return True
+    # Damerau-Levenshtein fallback for transposition/substitution typos
+    # Only for words of similar length (avoids matching unrelated words)
+    if abs(len(word1) - len(word2)) > 2:
+        return False
+    max_dist = 1 if shorter_len <= 5 else 2
+    return _damerau_levenshtein(word1, word2) <= max_dist
 
 
 def summarize_records(records_text, max_individual=SUMMARIZATION_THRESHOLD):
@@ -349,12 +378,12 @@ def retrieve_context(question):
         best_match = all_records[0] if all_records else ""
         best_score = scores_map.get(best_match, 0)
         other_records = all_records[1:] if len(all_records) > 1 else []
-        context = f"BEST MATCH (Cosine Score: {best_score}):\n{best_match}"
+        context = f"BEST MATCH (Relevance: {best_score}):\n{best_match}"
         if other_records:
             scored_others = []
             for rec in other_records:
                 rec_score = scores_map.get(rec, 0)
-                scored_others.append(f"[Cosine Score: {rec_score}] {rec}")
+                scored_others.append(f"[Relevance: {rec_score}] {rec}")
             other_text = summarize_records(scored_others)
             context += f"\n\nOTHER RELATED RECORDS ({len(other_records)}):\n{other_text}"
 

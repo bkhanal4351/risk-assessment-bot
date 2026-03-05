@@ -8,7 +8,7 @@ A Streamlit-powered chatbot that lets users ask natural language questions about
 - **User Feedback**: Thumbs up/down rating and optional comment box on every response, saved to CSV for continuous improvement
 - **Feedback-Informed Answers**: Past user ratings and comments are included in the LLM prompt to improve future responses
 - **Cosine Score Display**: Every record in the LLM response shows its cosine similarity score for transparency
-- **Typo-Tolerant Search**: Prefix-based stem matching handles misspellings and inflected forms (e.g., "fraus" matches "fraud", "spil" matches "spill")
+- **Typo-Tolerant Search**: Two-layer matching — prefix-based for inflected forms ("spill" matches "spilling") and Damerau-Levenshtein edit distance for transposition typos ("farud" matches "fraud")
 - **Dual Search Strategy**: Combines keyword-based lookup with embedding-based semantic search for better recall
 - **Smart Aggregate Detection**: Two-pass system that distinguishes between specific risk queries and analytical questions
 - **Streaming Responses**: LLM answers stream in real-time as tokens are generated
@@ -92,7 +92,8 @@ User Question
 |-----------|-----------|--------------|
 | Cosine Similarity | Semantic search | Measures angle between question vector and record vectors. Score 1.0 = identical meaning, 0.0 = unrelated. Used to rank the top 10 most relevant records. |
 | Sentence Embedding (BAAI/bge-base-en-v1.5) | Vector encoding | Transformer model that maps text to 768-dimensional dense vectors where semantically similar sentences are close together. Top-ranked on the MTEB retrieval benchmark. |
-| Prefix-based Stem Matching | Keyword lookup | Compares word prefixes to handle inflected forms and typos (e.g., "spill" matches "spilling", "fraus" matches "fraud"). Requires shared prefix of at least 4 chars covering 75%+ of the shorter word. |
+| Prefix-based Stem Matching | Keyword lookup | Compares word prefixes to handle inflected forms (e.g., "spill" matches "spilling", "prevent" matches "preventive"). Requires shared prefix of at least 4 chars covering 75%+ of the shorter word. |
+| Damerau-Levenshtein Distance | Keyword lookup (fallback) | Catches transposition and substitution typos that break prefix matching (e.g., "farud" matches "fraud", "enviroment" matches "environment"). Allows edit distance ≤1 for short words (≤5 chars) and ≤2 for longer words. Only compares words of similar length (±2 chars). |
 | Distinctive Word Matching | Keyword lookup | Allows single-word title matches for distinctive (non-generic) words. Words like "spill", "fraud", "chemical" trigger matches, while generic words like "risk", "control", "management" do not. |
 | TF-style Keyword Matching | Keyword lookup | Exact substring matching against pre-computed lowercase columns. Fast O(n) scan with set-based index collection instead of DataFrame concatenation. |
 

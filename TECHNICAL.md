@@ -33,7 +33,7 @@ This document provides a line-by-line walkthrough of every module in the EPA Ris
 6. [Algorithms In Depth](#algorithms-in-depth)
    - [Cosine Similarity](#cosine-similarity)
    - [Sentence Embeddings (BAAI/bge-base-en-v1.5)](#sentence-embeddings-baaibge-base-en-v15)
-   - [Prefix-Based Stem Matching](#prefix-based-stem-matching)
+   - [Two-Layer Fuzzy Matching (Prefix + Damerau-Levenshtein)](#two-layer-fuzzy-matching-prefix--damerau-levenshtein)
    - [Two-Pass Aggregate Detection](#two-pass-aggregate-detection)
    - [Distinctive Word Matching](#distinctive-word-matching)
    - [Record Summarization](#record-summarization)
@@ -245,38 +245,90 @@ def confidence_label(score):
 
 **Return**: Tuple `(label_string, color_string)`. The color string is used with Streamlit's `:{color}[text]` markdown syntax.
 
-#### `_stem_match(word1, word2, min_chars=4, ratio=0.75)` — Lines 48-61
+#### `_damerau_levenshtein(s1, s2)` — Lines 48-66
+
+```python
+def _damerau_levenshtein(s1, s2):
+    len1, len2 = len(s1), len(s2)
+    d = [[0] * (len2 + 1) for _ in range(len1 + 1)]
+    for i in range(len1 + 1):
+        d[i][0] = i
+    for j in range(len2 + 1):
+        d[0][j] = j
+    for i in range(1, len1 + 1):
+        for j in range(1, len2 + 1):
+            cost = 0 if s1[i - 1] == s2[j - 1] else 1
+            d[i][j] = min(
+                d[i - 1][j] + 1,
+                d[i][j - 1] + 1,
+                d[i - 1][j - 1] + cost,
+            )
+            if i > 1 and j > 1 and s1[i - 1] == s2[j - 2] and s1[i - 2] == s2[j - 1]:
+                d[i][j] = min(d[i][j], d[i - 2][j - 2] + 1)
+    return d[len1][len2]
+```
+
+**Algorithm**: Damerau-Levenshtein distance. Extends standard Levenshtein by counting adjacent transpositions as a single edit operation (cost 1 instead of 2). This is critical for catching keyboard typos where users swap two adjacent letters (e.g., "farud" → "fraud").
+
+**Operations counted** (each costs 1):
+- **Insertion**: "faud" → "fraud" (insert "r")
+- **Deletion**: "frauds" → "fraud" (delete "s")
+- **Substitution**: "fraod" → "fraud" (replace "o" with "u")
+- **Transposition**: "farud" → "fraud" (swap "ar" to "ra")
+
+Standard Levenshtein would count the "farud" → "fraud" transposition as 2 operations (delete "a" + insert "a"), making it harder to distinguish real typos from unrelated words.
+
+**Time complexity**: O(len1 × len2). For typical query words (4-15 chars), this is negligible.
+
+#### `_stem_match(word1, word2, min_chars=4, ratio=0.75)` — Lines 69-90
 
 ```python
 def _stem_match(word1, word2, min_chars=4, ratio=0.75):
     shorter_len = min(len(word1), len(word2))
     if shorter_len < min_chars:
         return word1 == word2
+    # Prefix match for inflected forms
     shared = 0
     for c1, c2 in zip(word1, word2):
         if c1 != c2:
             break
         shared += 1
-    return shared >= max(min_chars, shorter_len * ratio)
+    if shared >= max(min_chars, shorter_len * ratio):
+        return True
+    # Damerau-Levenshtein fallback for transposition/substitution typos
+    if abs(len(word1) - len(word2)) > 2:
+        return False
+    max_dist = 1 if shorter_len <= 5 else 2
+    return _damerau_levenshtein(word1, word2) <= max_dist
 ```
 
-**Algorithm**: Prefix-based stem matching. Instead of using a full NLP stemmer (like NLTK's Porter or Snowball), this uses a simple observation: most English inflected forms share a common prefix with their root word.
+**Algorithm**: Two-layer fuzzy matching. First tries prefix matching for inflected forms, then falls back to Damerau-Levenshtein distance for transposition typos.
 
-**How it works**:
-1. If either word is shorter than `min_chars` (4), require exact equality. This prevents false positives like "is" matching "it".
-2. Count the number of shared leading characters (`shared`).
-3. Return `True` if `shared >= max(4, 75% of the shorter word)`.
+**Layer 1 — Prefix match** (fast path):
+1. If either word is shorter than `min_chars` (4), require exact equality. Prevents false positives like "is" matching "it".
+2. Count shared leading characters (`shared`).
+3. If `shared >= max(4, 75% of shorter word)`, return `True`.
+
+**Layer 2 — Edit distance fallback** (when prefix fails):
+1. Reject if word lengths differ by more than 2 characters (prevents matching unrelated words of very different lengths).
+2. For short words (≤5 chars): allow Damerau-Levenshtein distance ≤ 1.
+3. For longer words (6+ chars): allow distance ≤ 2.
 
 **Examples**:
-| word1 | word2 | shared | shorter_len | threshold | match? |
-|-------|-------|--------|-------------|-----------|--------|
-| "spill" | "spilling" | 5 | 5 | max(4, 3.75) = 4 | Yes (5 >= 4) |
-| "prevent" | "preventive" | 7 | 7 | max(4, 5.25) = 5.25 | Yes (7 >= 6) |
-| "fraud" | "fraus" | 4 | 5 | max(4, 3.75) = 4 | Yes (4 >= 4) |
-| "data" | "database" | 4 | 4 | max(4, 3) = 4 | Yes (4 >= 4) |
-| "risk" | "response" | 1 | 4 | max(4, 3) = 4 | No (1 < 4) |
+| word1 | word2 | Layer 1 (prefix) | Layer 2 (DL distance) | match? |
+|-------|-------|-------------------|----------------------|--------|
+| "spill" | "spilling" | shared=5, threshold=4 → Yes | — | Yes (prefix) |
+| "prevent" | "preventive" | shared=7, threshold=6 → Yes | — | Yes (prefix) |
+| "fraud" | "fraus" | shared=4, threshold=4 → Yes | — | Yes (prefix) |
+| "farud" | "fraud" | shared=1, threshold=4 → No | DL=1, max=1 → Yes | Yes (edit dist) |
+| "enviroment" | "environment" | shared=6, threshold=8 → No | DL=1, max=2 → Yes | Yes (edit dist) |
+| "hazadorus" | "hazardous" | shared=3, threshold=7 → No | DL=2, max=2 → Yes | Yes (edit dist) |
+| "grant" | "plant" | shared=0, threshold=4 → No | DL=2, max=1 → No | No |
+| "risk" | "response" | shared=1, threshold=4 → No | len diff=4 > 2 → skip | No |
 
-**Why not use NLTK/SpaCy stemmers?** To avoid adding a heavy NLP dependency for a single function. The prefix approach works well for the controlled vocabulary in the EPA risk registry and handles typos (like "fraus" → "fraud") that standard stemmers would not.
+**Why two layers?** Prefix matching is O(n) and handles the common case (inflected forms) efficiently. Edit distance is O(n²) but only runs when the prefix check fails. The length-difference guard and distance thresholds prevent false positives between unrelated words of similar length.
+
+**Why not use NLTK/SpaCy stemmers?** To avoid adding a heavy NLP dependency for a single function. The two-layer approach handles both inflections and typos — standard stemmers only handle inflections, not transposition typos like "farud" → "fraud".
 
 #### `summarize_records(records_text, max_individual)` — Lines 64-85
 
@@ -1175,16 +1227,17 @@ Where `A` and `B` are 768-dimensional vectors. The result ranges from -1 (opposi
 
 **Why BGE-base?**: Chosen for its balance of quality (top-ranked on MTEB retrieval benchmark) and size (~110MB, fits in memory on any machine). BGE-large (1024-dim) is more accurate but ~3x slower and uses more memory.
 
-### Prefix-Based Stem Matching
+### Two-Layer Fuzzy Matching (Prefix + Damerau-Levenshtein)
 
 **Used in**: `lookup_records()`, `is_aggregate_question()`
 
-See the detailed explanation in the `_stem_match()` section above. Key properties:
+See the detailed explanation in the `_stem_match()` and `_damerau_levenshtein()` sections above. Key properties:
+
 - No external NLP library required
-- Handles typos naturally (e.g., "fraus" → "fraud" shares 4-char prefix)
-- Handles inflections (e.g., "spilling" → "spill", "preventive" → "prevent")
-- Minimum 4-char prefix prevents short-word false positives
-- 75% ratio requirement prevents long-word false positives
+- **Layer 1 (prefix)**: Handles inflections (e.g., "spilling" → "spill", "preventive" → "prevent") and prefix typos (e.g., "fraus" → "fraud")
+- **Layer 2 (Damerau-Levenshtein)**: Catches transposition typos where letters are swapped (e.g., "farud" → "fraud" = DL distance 1) and substitution typos (e.g., "enviroment" → "environment" = DL distance 1)
+- Length-difference guard (±2 chars) prevents matching unrelated words of very different lengths
+- Distance thresholds (≤1 for short words, ≤2 for long words) prevent false positives between similar-length but unrelated words (e.g., "grant" vs "plant" = DL distance 2 but max allowed = 1 for 5-char words)
 
 ### Two-Pass Aggregate Detection
 
