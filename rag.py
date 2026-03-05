@@ -329,9 +329,11 @@ def _score_record(record_text, q_embedding):
     return float(util.cos_sim(q_embedding, rec_embedding)[0][0])
 
 
-def _run_retrieval(query):
+def _run_retrieval(query, skip_keyword_scoring=False):
     """Inner retrieval: keyword lookup + embedding search. Returns
-    (lookup_texts, embedding_records, top_score, query, sources, scores_map)."""
+    (lookup_texts, embedding_records, top_score, query, sources, scores_map).
+    When skip_keyword_scoring=True (aggregate questions), skips the expensive
+    per-record embedding calls for keyword-only matches."""
     lookup_matches = lookup_records(query)
     lookup_texts = [row_to_text(row) for _, row in lookup_matches.iterrows()]
 
@@ -349,9 +351,11 @@ def _run_retrieval(query):
         scores_map[row_sentences[idx]] = round(sim_score, 2)
 
     # Score keyword-only matches against the query embedding
-    for text in lookup_texts:
-        if text not in scores_map:
-            scores_map[text] = round(_score_record(text, q_embedding), 2)
+    # Skip for aggregate questions where individual scores aren't displayed
+    if not skip_keyword_scoring:
+        for text in lookup_texts:
+            if text not in scores_map:
+                scores_map[text] = round(_score_record(text, q_embedding), 2)
 
     sources = []
     for idx, sim_score in zip(top_indices[:5], top_scores[:5]):
@@ -364,9 +368,8 @@ def _run_retrieval(query):
 
 def retrieve_context(question):
     """Main RAG pipeline: runs keyword + embedding search and builds LLM context."""
-    lookup_texts, embedding_records, top_score, query, sources, scores_map = _run_retrieval(question)
-
-    is_agg = is_aggregate_question(query)
+    is_agg = is_aggregate_question(question)
+    lookup_texts, embedding_records, top_score, query, sources, scores_map = _run_retrieval(question, skip_keyword_scoring=is_agg)
 
     all_records = lookup_texts + [r for r in embedding_records if r not in lookup_texts]
 
