@@ -106,7 +106,6 @@ FEEDBACK_LOOKBACK = 10  # max recent feedback entries to include in LLM prompt
 CHAT_FONT_SIZE_PX = 17
 
 APP_TITLE = "EPA Risk Assessment Assistant"
-APP_ICON = "shield"
 APP_DESCRIPTION = (
     "Ask natural language questions about the EPA Risk and Control Registry. "
     "The assistant uses semantic search and keyword matching to find relevant "

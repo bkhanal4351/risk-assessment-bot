@@ -139,12 +139,15 @@ risk_assessment_bot/
   config.py                           All constants, thresholds, prompts, and keyword lists
   rag.py                              RAG pipeline: data loading, retrieval, LLM, feedback
   app.py                              Streamlit UI layer (sidebar, chat, feedback, clear commands)
+  epa_logo.png                        EPA seal used as favicon and header logo
+  .streamlit/config.toml              Dark theme configuration (colors, font)
   DEMO_GUIDE.md                       Demo script and feature showcase for presentations
   Epa risk and control registry.csv   EPA risk and control dataset (1,650 records)
   feedback.csv                        User feedback log (created at runtime, gitignored)
   requirements.txt                    Python dependencies
   .env                                Environment variables (Groq API key)
   .gitignore                          Excludes .env, feedback.csv, and cache files from git
+  LICENSE                             MIT license
   README.md                           Project documentation
   TECHNICAL.md                        Line-by-line code documentation and algorithm details
 ```
