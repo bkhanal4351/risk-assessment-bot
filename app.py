@@ -23,6 +23,16 @@ from rag import (  # noqa: E402
 # STYLING
 # =============================================================================
 
+_COLOR_HEX = {"green": "#4caf50", "orange": "#ff9800", "red": "#f44336"}
+
+def _relevance_badge(label, color, score):
+    """Returns markdown with the label colored and score subtly tinted."""
+    hex_val = _COLOR_HEX.get(color, "#888")
+    return (
+        f"**Relevance:** :{color}[{label}] "
+        f'<span style="color:{hex_val};opacity:0.7">({score:.2f})</span>'
+    )
+
 st.markdown(f"""
 <style>
     .stChatMessage p, .stChatMessage li, .stChatMessage td {{
@@ -130,7 +140,8 @@ for i, message in enumerate(st.session_state.messages):
             # Show relevance badge
             if "score" in message:
                 label, color = confidence_label(message["score"])
-                st.markdown(f"**Relevance:** :{color}[{label}] ({message['score']:.2f})")
+                st.markdown(_relevance_badge(label, color, message["score"]),
+                            unsafe_allow_html=True)
             _render_sources(i, message)
             _render_feedback(i, message)
 
@@ -154,7 +165,7 @@ if user_question:
         context, score, is_agg, sources = retrieve_context(user_question)
 
         label, color = confidence_label(score)
-        st.markdown(f"**Relevance:** :{color}[{label}] ({score:.2f})")
+        st.markdown(_relevance_badge(label, color, score), unsafe_allow_html=True)
 
         chat_history = [
             {"role": m["role"], "content": m["content"]}
