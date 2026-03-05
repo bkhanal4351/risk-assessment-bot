@@ -1,0 +1,7 @@
+[theme]
+# Dark sidebar, lighter chat area for clear contrast
+primaryColor = "#4a9eda"          # calm blue for buttons, links, interactive elements
+backgroundColor = "#1e2229"       # main chat area - dark slate
+secondaryBackgroundColor = "#141820"  # sidebar - deeper navy, distinct from chat
+textColor = "#e8eaed"             # soft white text (not harsh pure white)
+font = "sans serif"

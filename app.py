@@ -29,12 +29,67 @@ def _relevance_badge(label, color, score):
 
 st.markdown(f"""
 <style>
+    /* Main chat area - slightly lighter than sidebar */
+    .stApp, .stMain, [data-testid="stAppViewContainer"],
+    [data-testid="stMainBlockContainer"] {{
+        background-color: #1e2229 !important;
+        color: #e8eaed !important;
+    }}
+
+    /* Sidebar - deeper navy for contrast */
+    [data-testid="stSidebar"], [data-testid="stSidebar"] > div {{
+        background-color: #141820 !important;
+    }}
+
+    /* Chat messages - subtle card effect */
+    .stChatMessage {{
+        background-color: #252a33 !important;
+        border-radius: 8px !important;
+        padding: 0.75rem 1rem !important;
+        margin-bottom: 0.5rem !important;
+        border: 1px solid rgba(74, 158, 218, 0.08);
+    }}
     .stChatMessage p, .stChatMessage li, .stChatMessage td {{
         font-size: {CHAT_FONT_SIZE_PX}px !important;
+        color: #e8eaed !important;
     }}
-    .stChatMessage {{
-        border-bottom: 1px solid rgba(128,128,128,0.1);
-        padding-bottom: 1rem;
+
+    /* Chat input area */
+    [data-testid="stChatInput"] textarea {{
+        background-color: #252a33 !important;
+        color: #e8eaed !important;
+        border: 1px solid #3a3f4b !important;
+        border-radius: 8px !important;
+    }}
+
+    /* Headers and captions */
+    h1, h2, h3, h4, .stMarkdown p {{
+        color: #e8eaed !important;
+    }}
+
+    /* Buttons */
+    .stButton > button {{
+        background-color: #252a33 !important;
+        color: #e8eaed !important;
+        border: 1px solid #3a3f4b !important;
+    }}
+    .stButton > button:hover {{
+        background-color: #3a3f4b !important;
+        border-color: #4a9eda !important;
+    }}
+
+    /* Expander (sources panel) */
+    [data-testid="stExpander"] {{
+        background-color: #252a33 !important;
+        border: 1px solid #3a3f4b !important;
+        border-radius: 8px !important;
+    }}
+
+    /* Text input (feedback comment box) */
+    .stTextInput input {{
+        background-color: #252a33 !important;
+        color: #e8eaed !important;
+        border: 1px solid #3a3f4b !important;
     }}
 </style>
 """, unsafe_allow_html=True)
